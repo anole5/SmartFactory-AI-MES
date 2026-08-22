@@ -1,0 +1,95 @@
+// 各模块 API 集中定义（按后端 Controller 分组）
+import { httpDelete, httpGet, httpPost, httpPut } from './request'
+import type {
+  Bom,
+  BomQuery,
+  BomSave,
+  LoginResult,
+  Material,
+  MaterialQuery,
+  MaterialSave,
+  PageResult,
+  Process,
+  ProcessQuery,
+  ProcessSave,
+  Product,
+  ProductQuery,
+  ProductSave,
+  Route,
+  RouteQuery,
+  RouteSave,
+  Workstation,
+  WorkstationQuery,
+  WorkstationSave,
+} from './types'
+
+// ---------- 认证 ----------
+export const authApi = {
+  login: (username: string, password: string) =>
+    httpPost<LoginResult>('/auth/login', { username, password }),
+}
+
+// ---------- 产品 ----------
+export const productApi = {
+  page: (params: ProductQuery) => httpGet<PageResult<Product>>('/master/products/page', params),
+  detail: (id: string) => httpGet<Product>(`/master/products/${id}`),
+  create: (data: ProductSave) => httpPost<string>('/master/products', data),
+  update: (id: string, data: ProductSave) => httpPut<void>(`/master/products/${id}`, data),
+  changeStatus: (id: string, status: string) =>
+    httpPut<void>(`/master/products/${id}/status`, { status }),
+  remove: (id: string) => httpDelete<void>(`/master/products/${id}`),
+}
+
+// ---------- 物料 ----------
+export const materialApi = {
+  page: (params: MaterialQuery) => httpGet<PageResult<Material>>('/master/materials/page', params),
+  detail: (id: string) => httpGet<Material>(`/master/materials/${id}`),
+  create: (data: MaterialSave) => httpPost<string>('/master/materials', data),
+  update: (id: string, data: MaterialSave) => httpPut<void>(`/master/materials/${id}`, data),
+  changeStatus: (id: string, status: string) =>
+    httpPut<void>(`/master/materials/${id}/status`, { status }),
+  remove: (id: string) => httpDelete<void>(`/master/materials/${id}`),
+}
+
+// ---------- 工序 ----------
+export const processApi = {
+  page: (params: ProcessQuery) => httpGet<PageResult<Process>>('/master/processes/page', params),
+  detail: (id: string) => httpGet<Process>(`/master/processes/${id}`),
+  create: (data: ProcessSave) => httpPost<string>('/master/processes', data),
+  update: (id: string, data: ProcessSave) => httpPut<void>(`/master/processes/${id}`, data),
+  remove: (id: string) => httpDelete<void>(`/master/processes/${id}`),
+}
+
+// ---------- 工位 ----------
+export const workstationApi = {
+  page: (params: WorkstationQuery) =>
+    httpGet<PageResult<Workstation>>('/master/workstations/page', params),
+  detail: (id: string) => httpGet<Workstation>(`/master/workstations/${id}`),
+  create: (data: WorkstationSave) => httpPost<string>('/master/workstations', data),
+  update: (id: string, data: WorkstationSave) => httpPut<void>(`/master/workstations/${id}`, data),
+  changeStatus: (id: string, status: string) =>
+    httpPut<void>(`/master/workstations/${id}/status`, { status }),
+  remove: (id: string) => httpDelete<void>(`/master/workstations/${id}`),
+}
+
+// ---------- BOM ----------
+export const bomApi = {
+  page: (params: BomQuery) => httpGet<PageResult<Bom>>('/master/boms/page', params),
+  detail: (id: string) => httpGet<Bom>(`/master/boms/${id}`),
+  create: (data: BomSave) => httpPost<string>('/master/boms', data),
+  update: (id: string, data: BomSave) => httpPut<void>(`/master/boms/${id}`, data),
+  changeStatus: (id: string, status: string) =>
+    httpPut<void>(`/master/boms/${id}/status`, { status }),
+  remove: (id: string) => httpDelete<void>(`/master/boms/${id}`),
+}
+
+// ---------- 工艺路线 ----------
+export const routeApi = {
+  page: (params: RouteQuery) => httpGet<PageResult<Route>>('/master/routes/page', params),
+  detail: (id: string) => httpGet<Route>(`/master/routes/${id}`),
+  create: (data: RouteSave) => httpPost<string>('/master/routes', data),
+  update: (id: string, data: RouteSave) => httpPut<void>(`/master/routes/${id}`, data),
+  changeStatus: (id: string, status: string) =>
+    httpPut<void>(`/master/routes/${id}/status`, { status }),
+  remove: (id: string) => httpDelete<void>(`/master/routes/${id}`),
+}
