@@ -237,3 +237,147 @@ export interface LoginResult {
   /** 权限标识集合，如 ["production:work-order:release"] */
   permissions?: string[]
 }
+
+/** 启用用户下拉项（派工弹窗选择操作员） */
+export interface UserOption {
+  id: string
+  username: string
+  realName?: string
+}
+
+// ---------- 生产工单 ----------
+export interface WorkOrder {
+  id: string
+  workOrderNo: string
+  externalOrderNo?: string
+  productId: string
+  productCodeSnapshot?: string
+  productNameSnapshot?: string
+  bomId: string
+  routeId: string
+  planQty: number
+  completedQty: number
+  goodQty: number
+  defectQty: number
+  status: string
+  priority: string
+  planStartTime?: string
+  planEndTime?: string
+  actualStartTime?: string
+  actualEndTime?: string
+  remark?: string
+  tasks?: OperationTask[]
+  reportCount?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface WorkOrderSave {
+  productId: string
+  planQty: number
+  externalOrderNo?: string
+  priority?: string
+  planStartTime?: string
+  planEndTime?: string
+  remark?: string
+}
+
+export interface WorkOrderQuery extends PageQuery {
+  keyword?: string
+  productId?: string
+  status?: string
+  planStartFrom?: string
+  planEndTo?: string
+}
+
+// ---------- 工序任务 ----------
+export interface OperationTask {
+  id: string
+  taskNo: string
+  workOrderId: string
+  workOrderNo?: string
+  processId: string
+  processCodeSnapshot?: string
+  processNameSnapshot?: string
+  sequenceNo: number
+  workstationId?: string | null
+  workstationCode?: string
+  workstationName?: string
+  operatorId?: string | null
+  operatorName?: string
+  equipmentCodeSnapshot?: string
+  equipmentNameSnapshot?: string
+  planQty: number
+  completedQty: number
+  goodQty: number
+  defectQty: number
+  status: string
+  needInspection: boolean
+  standardMinutes?: number
+  startTime?: string
+  endTime?: string
+  createdAt?: string
+}
+
+export interface TaskAssign {
+  operatorId: string
+  workstationId?: string
+}
+
+export interface TaskQuery extends PageQuery {
+  workOrderId?: string
+  status?: string
+  workstationId?: string
+  operatorId?: string
+}
+
+// ---------- 报工 ----------
+export interface WorkReport {
+  id: string
+  reportNo: string
+  workOrderId: string
+  workOrderNo?: string
+  taskId: string
+  taskNo?: string
+  processNameSnapshot?: string
+  operatorId: string
+  operatorName?: string
+  productBatchNo?: string
+  reportQty: number
+  goodQty: number
+  defectQty: number
+  startTime?: string
+  endTime?: string
+  remark?: string
+  createdAt?: string
+}
+
+export interface WorkReportSave {
+  taskId: string
+  reportQty: number
+  goodQty: number
+  defectQty: number
+  productBatchNo?: string
+  startTime?: string
+  endTime?: string
+  remark?: string
+}
+
+export interface WorkReportQuery extends PageQuery {
+  workOrderId?: string
+  taskId?: string
+  operatorId?: string
+}
+
+// ---------- 追溯 ----------
+export interface TraceRecord {
+  id: string
+  traceNo: string
+  workOrderId: string
+  taskId?: string | null
+  actionType: string
+  actionTime: string
+  operatorId: string
+  operatorName?: string
+  actionDetail?: string
+}

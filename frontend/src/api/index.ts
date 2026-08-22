@@ -8,6 +8,7 @@ import type {
   Material,
   MaterialQuery,
   MaterialSave,
+  OperationTask,
   PageResult,
   Process,
   ProcessQuery,
@@ -18,6 +19,16 @@ import type {
   Route,
   RouteQuery,
   RouteSave,
+  TaskAssign,
+  TaskQuery,
+  TraceRecord,
+  UserOption,
+  WorkOrder,
+  WorkOrderQuery,
+  WorkOrderSave,
+  WorkReport,
+  WorkReportQuery,
+  WorkReportSave,
   Workstation,
   WorkstationQuery,
   WorkstationSave,
@@ -27,6 +38,40 @@ import type {
 export const authApi = {
   login: (username: string, password: string) =>
     httpPost<LoginResult>('/auth/login', { username, password }),
+  users: () => httpGet<UserOption[]>('/auth/users'),
+}
+
+// ---------- 生产工单 ----------
+export const workOrderApi = {
+  page: (params: WorkOrderQuery) => httpGet<PageResult<WorkOrder>>('/production/work-orders/page', params),
+  detail: (id: string) => httpGet<WorkOrder>(`/production/work-orders/${id}`),
+  create: (data: WorkOrderSave) => httpPost<string>('/production/work-orders', data),
+  update: (id: string, data: WorkOrderSave) => httpPut<void>(`/production/work-orders/${id}`, data),
+  release: (id: string) => httpPost<void>(`/production/work-orders/${id}/release`),
+  cancel: (id: string) => httpPut<void>(`/production/work-orders/${id}/cancel`),
+}
+
+// ---------- 工序任务 ----------
+export const taskApi = {
+  page: (params: TaskQuery) => httpGet<PageResult<OperationTask>>('/production/tasks/page', params),
+  listByWorkOrder: (workOrderId: string) =>
+    httpGet<OperationTask[]>(`/production/tasks/for-work-order/${workOrderId}`),
+  assign: (id: string, data: TaskAssign) => httpPut<void>(`/production/tasks/${id}/assign`, data),
+  start: (id: string) => httpPut<void>(`/production/tasks/${id}/start`),
+  pause: (id: string) => httpPut<void>(`/production/tasks/${id}/pause`),
+  resume: (id: string) => httpPut<void>(`/production/tasks/${id}/resume`),
+}
+
+// ---------- 报工 ----------
+export const reportApi = {
+  page: (params: WorkReportQuery) => httpGet<PageResult<WorkReport>>('/production/reports/page', params),
+  create: (data: WorkReportSave) => httpPost<void>('/production/reports', data),
+}
+
+// ---------- 追溯 ----------
+export const traceApi = {
+  listByWorkOrder: (workOrderId: string) =>
+    httpGet<TraceRecord[]>('/production/traces', { workOrderId }),
 }
 
 // ---------- 产品 ----------

@@ -51,6 +51,24 @@ const router = createRouter({
           meta: { title: '工艺路线' },
         },
         {
+          path: 'work-orders',
+          name: 'work-orders',
+          component: () => import('@/views/work-orders/index.vue'),
+          meta: { title: '生产工单' },
+        },
+        {
+          path: 'tasks',
+          name: 'tasks',
+          component: () => import('@/views/tasks/index.vue'),
+          meta: { title: '工序任务' },
+        },
+        {
+          path: 'reports',
+          name: 'reports',
+          component: () => import('@/views/reports/index.vue'),
+          meta: { title: '报工记录' },
+        },
+        {
           path: 'tv-demo',
           name: 'tv-demo',
           component: () => import('@/views/tv-demo/index.vue'),

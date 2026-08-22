@@ -49,6 +49,18 @@ export const PRIORITY: Record<string, string> = {
   LOW: '低',
 }
 
+/** 追溯动作类型（工单详情时间线） */
+export const ACTION_TYPE: Record<string, string> = {
+  CREATE: '创建工单',
+  RELEASE: '工单下发',
+  ASSIGN: '派工',
+  START: '开工',
+  PAUSE: '暂停',
+  RESUME: '继续',
+  REPORT: '报工',
+  CANCEL: '取消',
+}
+
 /** 状态对应的 el-tag 颜色类型 */
 export const STATUS_TAG_TYPE: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'primary'> = {
   ENABLED: 'success',

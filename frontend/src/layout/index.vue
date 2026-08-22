@@ -31,6 +31,15 @@
         <el-menu-item index="/routes">
           <el-icon><Connection /></el-icon><span>工艺路线</span>
         </el-menu-item>
+        <el-menu-item index="/work-orders">
+          <el-icon><Tickets /></el-icon><span>生产工单</span>
+        </el-menu-item>
+        <el-menu-item index="/tasks">
+          <el-icon><Operation /></el-icon><span>工序任务</span>
+        </el-menu-item>
+        <el-menu-item index="/reports">
+          <el-icon><DataLine /></el-icon><span>报工记录</span>
+        </el-menu-item>
         <el-menu-item index="/tv-demo">
           <el-icon><VideoPlay /></el-icon><span>电视 Demo</span>
         </el-menu-item>
