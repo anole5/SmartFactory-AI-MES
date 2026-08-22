@@ -1,0 +1,21 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 后端（Maven）
+backend/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# 前端（Node）
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 日志与临时文件
+*.log
+logs/
+.DS_Store
+Thumbs.db
