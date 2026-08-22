@@ -43,7 +43,7 @@
         <div class="page-title">{{ route.meta.title }}</div>
         <div class="header-right">
           <el-icon><User /></el-icon>
-          <span class="username">{{ auth.username || '演示用户' }}</span>
+          <span class="username">{{ auth.userInfo?.realName || auth.userInfo?.username || '未登录' }}</span>
           <el-button link type="danger" @click="handleLogout">退出登录</el-button>
         </div>
       </el-header>

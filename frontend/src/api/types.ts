@@ -228,4 +228,12 @@ export interface RouteQuery extends PageQuery {
 export interface LoginResult {
   token: string
   username: string
+  /** Long 序列化为字符串 */
+  userId: string
+  /** 真实姓名/昵称（顶栏展示） */
+  realName?: string
+  /** 角色编码集合，如 ["SUPER_ADMIN"] */
+  roles?: string[]
+  /** 权限标识集合，如 ["production:work-order:release"] */
+  permissions?: string[]
 }

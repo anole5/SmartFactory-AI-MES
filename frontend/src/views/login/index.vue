@@ -36,7 +36,7 @@
         </el-form-item>
       </el-form>
       <el-alert type="info" :closable="false">
-        第 1 周为演示登录：任意用户名/密码均可进入，第 2 周接入真实用户与权限体系
+        演示账号：admin / admin123（管理员） · operator / operator123（操作工） · planning / planning123（计划员）
       </el-alert>
     </el-card>
   </div>
@@ -68,7 +68,7 @@ async function handleLogin() {
   loading.value = true
   try {
     const result = await authApi.login(form.username, form.password)
-    auth.setLogin(result.token, result.username)
+    auth.setLogin(result)
     // 有 redirect 参数则回原页面（如会话过期被踢到登录页的场景）
     const redirect = (route.query.redirect as string) || '/'
     router.push(redirect)
