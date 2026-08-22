@@ -1,0 +1,37 @@
+server:
+  port: 8080
+  servlet:
+    # 所有接口统一挂 /api 前缀，前端 vite proxy 直接透传、无需重写路径
+    context-path: /api
+
+spring:
+  application:
+    name: smartfactory-mes
+  datasource:
+    # 开发环境复用本机 Docker 的 mysql:8.0 容器（尚硅谷课程栈，端口 3306）
+    url: jdbc:mysql://localhost:3306/smartfactory_mes?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: smartfactory
+    password: Smartfactory@123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jackson:
+    time-zone: Asia/Shanghai
+
+mybatis-plus:
+  configuration:
+    # 开发期打印 SQL，方便调试；上线可改为 org.apache.ibatis.logging.nologging.NoLoggingImpl
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 下划线列名 <-> 驼峰属性 自动映射
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      # 逻辑删除：所有实体继承 BaseEntity 的 deleted 字段
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+      # 主键策略：数据库 AUTO_INCREMENT（演示项目 ID 小、调试直观，
+      # 也避免雪花 19 位 Long 传到前端 JS 丢精度；业务单号第 2 周由 IdGenerator 生成）
+      id-type: auto
+
+logging:
+  level:
+    com.smartfactory.mes: debug
