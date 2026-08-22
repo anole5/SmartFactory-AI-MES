@@ -37,6 +37,9 @@ public class WorkOrderVO {
     /** 工序任务列表（下发后填充，按顺序号升序） */
     private List<OperationTaskVO> tasks;
 
+    /** 报工记录条数（仅详情填充） */
+    private Long reportCount;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

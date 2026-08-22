@@ -27,12 +27,14 @@ import com.smartfactory.mes.production.dto.WorkOrderSaveDTO;
 import com.smartfactory.mes.production.dto.WorkOrderVO;
 import com.smartfactory.mes.production.entity.MesOperationTask;
 import com.smartfactory.mes.production.entity.MesWorkOrder;
+import com.smartfactory.mes.production.entity.MesWorkReport;
 import com.smartfactory.mes.production.enums.ActionType;
 import com.smartfactory.mes.production.enums.OrderPriority;
 import com.smartfactory.mes.production.enums.TaskStatus;
 import com.smartfactory.mes.production.enums.WorkOrderStatus;
 import com.smartfactory.mes.production.mapper.MesOperationTaskMapper;
 import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
+import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
 import com.smartfactory.mes.production.service.OperationTaskService;
 import com.smartfactory.mes.production.service.TraceService;
 import com.smartfactory.mes.production.service.WorkOrderService;
@@ -63,6 +65,7 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
     private final ProcessMapper processMapper;
     private final WorkstationMapper workstationMapper;
     private final MesOperationTaskMapper operationTaskMapper;
+    private final MesWorkReportMapper reportMapper;
     private final OrderNoGenerator orderNoGenerator;
     private final TraceService traceService;
     private final OperationTaskService operationTaskService;
@@ -70,7 +73,8 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
     public WorkOrderServiceImpl(ProductMapper productMapper, BomMapper bomMapper,
                                 RouteMapper routeMapper, RouteStepMapper routeStepMapper,
                                 ProcessMapper processMapper, WorkstationMapper workstationMapper,
-                                MesOperationTaskMapper operationTaskMapper, OrderNoGenerator orderNoGenerator,
+                                MesOperationTaskMapper operationTaskMapper, MesWorkReportMapper reportMapper,
+                                OrderNoGenerator orderNoGenerator,
                                 TraceService traceService, OperationTaskService operationTaskService) {
         this.productMapper = productMapper;
         this.bomMapper = bomMapper;
@@ -79,6 +83,7 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
         this.processMapper = processMapper;
         this.workstationMapper = workstationMapper;
         this.operationTaskMapper = operationTaskMapper;
+        this.reportMapper = reportMapper;
         this.orderNoGenerator = orderNoGenerator;
         this.traceService = traceService;
         this.operationTaskService = operationTaskService;
@@ -105,7 +110,8 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
     public WorkOrderVO getDetail(Long id) {
         WorkOrderVO vo = WorkOrderVO.of(mustExist(id));
         vo.setTasks(operationTaskService.listByWorkOrder(id));
-        // TODO T8：填充报工统计
+        vo.setReportCount(reportMapper.selectCount(new LambdaQueryWrapper<MesWorkReport>()
+                .eq(MesWorkReport::getWorkOrderId, id)));
         return vo;
     }
 
