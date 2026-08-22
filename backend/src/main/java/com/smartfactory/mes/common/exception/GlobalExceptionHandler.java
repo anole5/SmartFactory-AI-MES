@@ -9,6 +9,7 @@ import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -57,6 +58,14 @@ public class GlobalExceptionHandler {
     public ApiResult<Void> handleMessageNotReadable(HttpMessageNotReadableException e) {
         log.warn("请求体解析失败: {}", e.getMessage());
         return ApiResult.error(ResultCode.PARAM_ERROR, "请求参数格式错误: " + e.getMostSpecificCause().getMessage());
+    }
+
+    /** HTTP 方法不支持（如对 PUT 端点发 POST）：405 而非兜底 500 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public ApiResult<Void> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        log.warn("方法不支持: {}", e.getMessage());
+        return ApiResult.error(ResultCode.METHOD_NOT_ALLOWED, "请求方法不支持: " + e.getMethod());
     }
 
     /** 未知路径：Spring Boot 3.2+ 走 NoResourceFoundException，返回统一 404 结构 */

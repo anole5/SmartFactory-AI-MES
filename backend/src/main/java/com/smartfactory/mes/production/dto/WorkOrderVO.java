@@ -5,9 +5,10 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * 生产工单出参（列表/详情同构；详情在 T6 补任务列表、T8 补报工统计）
+ * 生产工单出参（列表不带任务，详情带）
  */
 @Getter
 @Setter
@@ -32,6 +33,10 @@ public class WorkOrderVO {
     private LocalDateTime actualStartTime;
     private LocalDateTime actualEndTime;
     private String remark;
+
+    /** 工序任务列表（下发后填充，按顺序号升序） */
+    private List<OperationTaskVO> tasks;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

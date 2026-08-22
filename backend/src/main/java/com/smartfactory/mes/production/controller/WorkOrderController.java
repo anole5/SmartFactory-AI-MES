@@ -63,4 +63,12 @@ public class WorkOrderController {
         workOrderService.cancel(id);
         return ApiResult.success();
     }
+
+    /** 下发工单：按工艺路线生成工序任务 */
+    @RequirePermission("production:work-order:release")
+    @PostMapping("/{id}/release")
+    public ApiResult<Void> release(@PathVariable Long id) {
+        workOrderService.release(id);
+        return ApiResult.success();
+    }
 }

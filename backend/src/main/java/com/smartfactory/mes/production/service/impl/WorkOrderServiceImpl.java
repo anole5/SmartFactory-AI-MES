@@ -1,35 +1,50 @@
 package com.smartfactory.mes.production.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
 import com.smartfactory.mes.common.sequence.OrderNoGenerator;
 import com.smartfactory.mes.master.entity.MesBom;
+import com.smartfactory.mes.master.entity.MesProcess;
 import com.smartfactory.mes.master.entity.MesProduct;
 import com.smartfactory.mes.master.entity.MesRoute;
+import com.smartfactory.mes.master.entity.MesRouteStep;
+import com.smartfactory.mes.master.entity.MesWorkstation;
 import com.smartfactory.mes.master.enums.BomStatus;
 import com.smartfactory.mes.master.enums.ProductStatus;
 import com.smartfactory.mes.master.enums.RouteStatus;
 import com.smartfactory.mes.master.mapper.BomMapper;
+import com.smartfactory.mes.master.mapper.ProcessMapper;
 import com.smartfactory.mes.master.mapper.ProductMapper;
 import com.smartfactory.mes.master.mapper.RouteMapper;
+import com.smartfactory.mes.master.mapper.RouteStepMapper;
+import com.smartfactory.mes.master.mapper.WorkstationMapper;
 import com.smartfactory.mes.production.dto.WorkOrderQueryDTO;
 import com.smartfactory.mes.production.dto.WorkOrderSaveDTO;
 import com.smartfactory.mes.production.dto.WorkOrderVO;
+import com.smartfactory.mes.production.entity.MesOperationTask;
 import com.smartfactory.mes.production.entity.MesWorkOrder;
 import com.smartfactory.mes.production.enums.ActionType;
 import com.smartfactory.mes.production.enums.OrderPriority;
+import com.smartfactory.mes.production.enums.TaskStatus;
 import com.smartfactory.mes.production.enums.WorkOrderStatus;
+import com.smartfactory.mes.production.mapper.MesOperationTaskMapper;
 import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
+import com.smartfactory.mes.production.service.OperationTaskService;
 import com.smartfactory.mes.production.service.TraceService;
 import com.smartfactory.mes.production.service.WorkOrderService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 生产工单服务实现
@@ -44,17 +59,29 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
     private final ProductMapper productMapper;
     private final BomMapper bomMapper;
     private final RouteMapper routeMapper;
+    private final RouteStepMapper routeStepMapper;
+    private final ProcessMapper processMapper;
+    private final WorkstationMapper workstationMapper;
+    private final MesOperationTaskMapper operationTaskMapper;
     private final OrderNoGenerator orderNoGenerator;
     private final TraceService traceService;
+    private final OperationTaskService operationTaskService;
 
     public WorkOrderServiceImpl(ProductMapper productMapper, BomMapper bomMapper,
-                                RouteMapper routeMapper, OrderNoGenerator orderNoGenerator,
-                                TraceService traceService) {
+                                RouteMapper routeMapper, RouteStepMapper routeStepMapper,
+                                ProcessMapper processMapper, WorkstationMapper workstationMapper,
+                                MesOperationTaskMapper operationTaskMapper, OrderNoGenerator orderNoGenerator,
+                                TraceService traceService, OperationTaskService operationTaskService) {
         this.productMapper = productMapper;
         this.bomMapper = bomMapper;
         this.routeMapper = routeMapper;
+        this.routeStepMapper = routeStepMapper;
+        this.processMapper = processMapper;
+        this.workstationMapper = workstationMapper;
+        this.operationTaskMapper = operationTaskMapper;
         this.orderNoGenerator = orderNoGenerator;
         this.traceService = traceService;
+        this.operationTaskService = operationTaskService;
     }
 
     @Override
@@ -77,7 +104,8 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
     @Override
     public WorkOrderVO getDetail(Long id) {
         WorkOrderVO vo = WorkOrderVO.of(mustExist(id));
-        // TODO T6：填充工序任务列表；TODO T8：填充报工统计
+        vo.setTasks(operationTaskService.listByWorkOrder(id));
+        // TODO T8：填充报工统计
         return vo;
     }
 
@@ -128,6 +156,90 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
         this.updateById(wo);
         traceService.write(wo.getId(), null, ActionType.CANCEL,
                 Map.of("workOrderNo", wo.getWorkOrderNo()));
+    }
+
+    @Override
+    @Transactional
+    public void release(Long id) {
+        MesWorkOrder wo = mustExist(id);
+        if (wo.getStatus() != WorkOrderStatus.DRAFT) {
+            throw new BusinessException("仅草稿状态的工单可以下发，当前状态: " + wo.getStatus().getLabel());
+        }
+        // 下发前二次校验：创建后产品可能被停用、BOM/路线可能被作废——下发瞬间再兜底
+        MesProduct product = productMapper.selectById(wo.getProductId());
+        if (product == null || product.getStatus() != ProductStatus.ENABLED) {
+            throw new BusinessException("产品未启用，不能下发工单: " + wo.getProductCodeSnapshot());
+        }
+        MesBom bom = bomMapper.selectById(wo.getBomId());
+        if (bom == null || bom.getStatus() != BomStatus.ACTIVE) {
+            throw new BusinessException("BOM 已失效，不能下发工单（请重新维护工单的 BOM）");
+        }
+        MesRoute route = routeMapper.selectById(wo.getRouteId());
+        if (route == null || route.getStatus() != RouteStatus.ACTIVE) {
+            throw new BusinessException("工艺路线已失效，不能下发工单（请重新维护工单的工艺路线）");
+        }
+        List<MesRouteStep> steps = routeStepMapper.selectList(new LambdaQueryWrapper<MesRouteStep>()
+                .eq(MesRouteStep::getRouteId, wo.getRouteId())
+                .orderByAsc(MesRouteStep::getSequenceNo));
+        if (steps.isEmpty()) {
+            throw new BusinessException("工艺路线无步骤，不能下发工单");
+        }
+        generateTasks(wo, steps);
+        // CAS 防并发双下发：并发请求只有一个能把 DRAFT 改成 RELEASED，
+        // 输家 UPDATE 影响 0 行 → 抛异常 → 其已生成的任务随事务回滚
+        boolean released = this.update(new LambdaUpdateWrapper<MesWorkOrder>()
+                .eq(MesWorkOrder::getId, id)
+                .eq(MesWorkOrder::getStatus, WorkOrderStatus.DRAFT)
+                .set(MesWorkOrder::getStatus, WorkOrderStatus.RELEASED));
+        if (!released) {
+            throw new BusinessException("工单状态已变化，下发失败，请刷新后重试");
+        }
+        traceService.write(wo.getId(), null, ActionType.RELEASE,
+                Map.of("workOrderNo", wo.getWorkOrderNo(), "taskCount", steps.size(),
+                        "routeId", wo.getRouteId()));
+    }
+
+    /** 按路线步骤生成工序任务：快照固化 + 默认工位/设备回填 + 数量=工单计划数量 */
+    private void generateTasks(MesWorkOrder wo, List<MesRouteStep> steps) {
+        Set<Long> workstationIds = steps.stream().map(MesRouteStep::getWorkstationId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, MesWorkstation> workstations = workstationIds.isEmpty() ? Map.of()
+                : workstationMapper.selectBatchIds(workstationIds).stream()
+                .collect(Collectors.toMap(MesWorkstation::getId, Function.identity()));
+        Set<Long> processIds = steps.stream().map(MesRouteStep::getProcessId).collect(Collectors.toSet());
+        Map<Long, MesProcess> processes = processMapper.selectBatchIds(processIds).stream()
+                .collect(Collectors.toMap(MesProcess::getId, Function.identity()));
+        for (MesRouteStep step : steps) {
+            MesOperationTask task = new MesOperationTask();
+            task.setTaskNo(orderNoGenerator.nextTaskNo());
+            task.setWorkOrderId(wo.getId());
+            task.setProcessId(step.getProcessId());
+            // 快照优先取路线步骤已固化的值；空则回退工序主数据（兼容手工补录数据）
+            String processCode = step.getProcessCodeSnapshot();
+            String processName = step.getProcessNameSnapshot();
+            MesProcess process = processes.get(step.getProcessId());
+            if (!StringUtils.hasText(processCode) && process != null) {
+                processCode = process.getProcessCode();
+                processName = process.getProcessName();
+            }
+            task.setProcessCodeSnapshot(processCode);
+            task.setProcessNameSnapshot(processName);
+            task.setSequenceNo(step.getSequenceNo());
+            task.setWorkstationId(step.getWorkstationId());
+            MesWorkstation ws = workstations.get(step.getWorkstationId());
+            if (ws != null) {
+                task.setEquipmentCodeSnapshot(ws.getEquipmentCode());
+                task.setEquipmentNameSnapshot(ws.getEquipmentName());
+            }
+            task.setPlanQty(wo.getPlanQty());
+            task.setCompletedQty(0);
+            task.setGoodQty(0);
+            task.setDefectQty(0);
+            task.setStatus(TaskStatus.PENDING);
+            task.setNeedInspection(Boolean.TRUE.equals(step.getNeedInspection()));
+            task.setStandardMinutes(step.getStandardMinutes());
+            operationTaskMapper.insert(task);
+        }
     }
 
     private MesWorkOrder mustExist(Long id) {

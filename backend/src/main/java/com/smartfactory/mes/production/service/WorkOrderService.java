@@ -24,4 +24,7 @@ public interface WorkOrderService {
 
     /** 取消工单：DRAFT/RELEASED/IN_PROGRESS -> CANCELLED（同状态幂等，其余 409） */
     void cancel(Long id);
+
+    /** 下发工单：校验链路后按工艺路线生成工序任务，CAS 防并发双下发（整单事务） */
+    void release(Long id);
 }

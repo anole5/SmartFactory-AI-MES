@@ -13,6 +13,7 @@ public enum ResultCode {
     UNAUTHORIZED(401, "未登录或登录已过期"),
     FORBIDDEN(403, "无权限访问"),
     NOT_FOUND(404, "资源不存在"),
+    METHOD_NOT_ALLOWED(405, "请求方法不支持"),
     CONFLICT(409, "业务规则冲突"),
     SERVER_ERROR(500, "系统内部错误");
 
