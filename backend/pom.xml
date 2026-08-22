@@ -61,6 +61,33 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- JWT：jjwt 0.12.x（API 与旧教程差异大，parserBuilder()/getBody() 已删除，
+             锁 0.12.6 稳定版；jjwt-jackson 提供标准 JSON 序列化） -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- BCrypt 密码加密：只引 crypto 工具包，不引 spring-boot-starter-security
+             （避免触发 Spring Security 自动配置链，拦截器方案不需要它）；版本由 Boot parent 管理 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

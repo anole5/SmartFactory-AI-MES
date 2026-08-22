@@ -1,4 +1,4 @@
-package com.smartfactory.mes.master.entity;
+package com.smartfactory.mes.common.entity;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
@@ -13,7 +13,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 实体通用基类：主键 + 租户 + 审计字段 + 逻辑删除
+ * 实体通用基类：主键 + 租户 + 审计字段 + 逻辑删除（全模块共享）
  *
  * <p>所有业务表统一使用这套通用字段（见 sql/01-schema.sql 的设计约定）：
  * id / tenant_id / created_by / created_at / updated_by / updated_at / deleted</p>
@@ -26,10 +26,10 @@ public abstract class BaseEntity implements Serializable {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 租户 ID：第一版固定默认租户 1，暂不做租户隔离拦截器（多租户是第 2 周+的主题） */
+    /** 租户 ID：第一版固定默认租户 1，暂不做租户隔离拦截器（多租户是后续主题） */
     private Long tenantId = 1L;
 
-    /** 创建人：自动填充，登录接入前固定 0 */
+    /** 创建人：自动填充（第 2 周起从 CurrentUserContext 取当前登录用户，未登录时 0） */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 

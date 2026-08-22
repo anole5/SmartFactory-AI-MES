@@ -4,6 +4,7 @@ import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -19,12 +20,16 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    /** 业务异常：返回业务 code（默认 409）与提示语 */
+    /** 业务异常：HTTP 状态与业务 code 对齐（409 业务冲突 / 401 登录失败 / 403 无权限等）。
+     *  第 1 周写死 @ResponseStatus(CONFLICT)，第 2 周登录失败（401）后改为动态映射 */
     @ExceptionHandler(BusinessException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public ApiResult<Void> handleBusinessException(BusinessException e) {
+    public ResponseEntity<ApiResult<Void>> handleBusinessException(BusinessException e) {
         log.warn("业务异常: {}", e.getMessage());
-        return ApiResult.error(e.getResultCode(), e.getMessage());
+        HttpStatus status = HttpStatus.resolve(e.getResultCode().getCode());
+        if (status == null) {
+            status = HttpStatus.CONFLICT;
+        }
+        return ResponseEntity.status(status).body(ApiResult.error(e.getResultCode(), e.getMessage()));
     }
 
     /** 请求体 @Valid 校验失败：返回 400 与第一个字段错误 */

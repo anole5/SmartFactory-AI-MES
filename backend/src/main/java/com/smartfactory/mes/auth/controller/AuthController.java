@@ -2,26 +2,40 @@ package com.smartfactory.mes.auth.controller;
 
 import com.smartfactory.mes.auth.dto.LoginDTO;
 import com.smartfactory.mes.auth.dto.LoginVO;
+import com.smartfactory.mes.auth.entity.SysUser;
+import com.smartfactory.mes.auth.service.AuthService;
 import com.smartfactory.mes.common.api.ApiResult;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
- * 认证接口（第 1 周简化登录：不校验用户名密码，直接发固定 token；
- * 第 2 周接真实用户表 + JWT + 权限拦截，见 README 进度说明）
+ * 认证接口（第 2 周：真实用户表 + JWT，替换第 1 周固定 token）
  */
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
 
-    /** 演示用固定 token，前端存 localStorage 并在请求头 Authorization 携带 */
-    public static final String DEMO_TOKEN = "smartfactory-demo-token";
+    private final AuthService authService;
 
+    public AuthController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    /** 登录（白名单接口，不经过鉴权拦截器） */
     @PostMapping("/login")
     public ApiResult<LoginVO> login(@Valid @RequestBody LoginDTO dto) {
-        return ApiResult.success(new LoginVO(DEMO_TOKEN, dto.getUsername()));
+        return ApiResult.success(authService.login(dto));
+    }
+
+    /** 启用用户列表（派工弹窗选择操作员用） */
+    @GetMapping("/users")
+    public ApiResult<List<SysUser>> users() {
+        return ApiResult.success(authService.listEnabledUsers());
     }
 }

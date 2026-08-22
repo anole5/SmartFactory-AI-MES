@@ -1,5 +1,7 @@
 package com.smartfactory.mes.master.entity;
 
+import com.smartfactory.mes.common.entity.BaseEntity;
+
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Getter;
 import lombok.Setter;
