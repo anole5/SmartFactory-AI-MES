@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -48,6 +49,14 @@ public class GlobalExceptionHandler {
         FieldError fieldError = e.getBindingResult().getFieldError();
         String message = fieldError != null ? fieldError.getDefaultMessage() : ResultCode.PARAM_ERROR.getMessage();
         return ApiResult.error(ResultCode.PARAM_ERROR, message);
+    }
+
+    /** 请求体 JSON 解析失败（如日期格式不符 yyyy-MM-dd HH:mm:ss）：属于客户端传参错误，应 400 而非 500 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResult<Void> handleMessageNotReadable(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败: {}", e.getMessage());
+        return ApiResult.error(ResultCode.PARAM_ERROR, "请求参数格式错误: " + e.getMostSpecificCause().getMessage());
     }
 
     /** 未知路径：Spring Boot 3.2+ 走 NoResourceFoundException，返回统一 404 结构 */
