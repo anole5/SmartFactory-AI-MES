@@ -1,5 +1,6 @@
 package com.smartfactory.mes.master.controller;
 
+import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.api.StatusUpdateDTO;
@@ -43,12 +44,14 @@ public class WorkstationController {
     }
 
     /** 创建工位 */
+    @RequirePermission("master:workstation:create")
     @PostMapping
     public ApiResult<Long> create(@Valid @RequestBody WorkstationSaveDTO dto) {
         return ApiResult.success(workstationService.create(dto));
     }
 
     /** 更新工位 */
+    @RequirePermission("master:workstation:update")
     @PutMapping("/{id}")
     public ApiResult<Void> update(@PathVariable Long id, @Valid @RequestBody WorkstationSaveDTO dto) {
         workstationService.update(id, dto);
@@ -56,6 +59,7 @@ public class WorkstationController {
     }
 
     /** 启停用工位 */
+    @RequirePermission("master:workstation:status")
     @PutMapping("/{id}/status")
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusUpdateDTO dto) {
         workstationService.changeStatus(id, dto.getStatus());
@@ -63,6 +67,7 @@ public class WorkstationController {
     }
 
     /** 删除工位（逻辑删除） */
+    @RequirePermission("master:workstation:delete")
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@PathVariable Long id) {
         workstationService.delete(id);

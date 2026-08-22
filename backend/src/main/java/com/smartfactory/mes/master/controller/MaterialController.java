@@ -1,5 +1,6 @@
 package com.smartfactory.mes.master.controller;
 
+import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.api.StatusUpdateDTO;
@@ -43,12 +44,14 @@ public class MaterialController {
     }
 
     /** 创建物料 */
+    @RequirePermission("master:material:create")
     @PostMapping
     public ApiResult<Long> create(@Valid @RequestBody MaterialSaveDTO dto) {
         return ApiResult.success(materialService.create(dto));
     }
 
     /** 更新物料 */
+    @RequirePermission("master:material:update")
     @PutMapping("/{id}")
     public ApiResult<Void> update(@PathVariable Long id, @Valid @RequestBody MaterialSaveDTO dto) {
         materialService.update(id, dto);
@@ -56,6 +59,7 @@ public class MaterialController {
     }
 
     /** 启停用物料 */
+    @RequirePermission("master:material:status")
     @PutMapping("/{id}/status")
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusUpdateDTO dto) {
         materialService.changeStatus(id, dto.getStatus());
@@ -63,6 +67,7 @@ public class MaterialController {
     }
 
     /** 删除物料（逻辑删除） */
+    @RequirePermission("master:material:delete")
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@PathVariable Long id) {
         materialService.delete(id);

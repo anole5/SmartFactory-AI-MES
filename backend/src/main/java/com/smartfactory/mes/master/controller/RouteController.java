@@ -1,5 +1,6 @@
 package com.smartfactory.mes.master.controller;
 
+import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.api.StatusUpdateDTO;
@@ -43,12 +44,14 @@ public class RouteController {
     }
 
     /** 创建工艺路线（头 + 步骤） */
+    @RequirePermission("master:route:create")
     @PostMapping
     public ApiResult<Long> create(@Valid @RequestBody RouteSaveDTO dto) {
         return ApiResult.success(routeService.create(dto));
     }
 
     /** 更新工艺路线（仅草稿状态） */
+    @RequirePermission("master:route:update")
     @PutMapping("/{id}")
     public ApiResult<Void> update(@PathVariable Long id, @Valid @RequestBody RouteSaveDTO dto) {
         routeService.update(id, dto);
@@ -56,6 +59,7 @@ public class RouteController {
     }
 
     /** 工艺路线状态流转（DRAFT -> ACTIVE -> OBSOLETE） */
+    @RequirePermission("master:route:status")
     @PutMapping("/{id}/status")
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusUpdateDTO dto) {
         routeService.changeStatus(id, dto.getStatus());
@@ -63,6 +67,7 @@ public class RouteController {
     }
 
     /** 删除工艺路线（仅草稿状态，逻辑删除含步骤） */
+    @RequirePermission("master:route:delete")
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@PathVariable Long id) {
         routeService.delete(id);

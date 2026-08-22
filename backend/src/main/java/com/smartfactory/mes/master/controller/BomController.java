@@ -1,5 +1,6 @@
 package com.smartfactory.mes.master.controller;
 
+import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.api.StatusUpdateDTO;
@@ -42,13 +43,15 @@ public class BomController {
         return ApiResult.success(bomService.getDetail(id));
     }
 
-    /** 创建 BOM（头 + 明细） */
+    /** 创建 BOM */
+    @RequirePermission("master:bom:create")
     @PostMapping
     public ApiResult<Long> create(@Valid @RequestBody BomSaveDTO dto) {
         return ApiResult.success(bomService.create(dto));
     }
 
-    /** 更新 BOM（仅草稿状态） */
+    /** 更新 BOM */
+    @RequirePermission("master:bom:update")
     @PutMapping("/{id}")
     public ApiResult<Void> update(@PathVariable Long id, @Valid @RequestBody BomSaveDTO dto) {
         bomService.update(id, dto);
@@ -56,13 +59,15 @@ public class BomController {
     }
 
     /** BOM 状态流转（DRAFT -> ACTIVE -> OBSOLETE） */
+    @RequirePermission("master:bom:status")
     @PutMapping("/{id}/status")
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusUpdateDTO dto) {
         bomService.changeStatus(id, dto.getStatus());
         return ApiResult.success();
     }
 
-    /** 删除 BOM（仅草稿状态，逻辑删除含明细） */
+    /** 删除 BOM */
+    @RequirePermission("master:bom:delete")
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@PathVariable Long id) {
         bomService.delete(id);

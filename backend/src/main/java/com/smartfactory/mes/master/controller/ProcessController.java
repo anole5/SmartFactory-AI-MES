@@ -1,5 +1,6 @@
 package com.smartfactory.mes.master.controller;
 
+import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.master.dto.ProcessQueryDTO;
@@ -42,12 +43,14 @@ public class ProcessController {
     }
 
     /** 创建工序 */
+    @RequirePermission("master:process:create")
     @PostMapping
     public ApiResult<Long> create(@Valid @RequestBody ProcessSaveDTO dto) {
         return ApiResult.success(processService.create(dto));
     }
 
     /** 更新工序 */
+    @RequirePermission("master:process:update")
     @PutMapping("/{id}")
     public ApiResult<Void> update(@PathVariable Long id, @Valid @RequestBody ProcessSaveDTO dto) {
         processService.update(id, dto);
@@ -55,6 +58,7 @@ public class ProcessController {
     }
 
     /** 删除工序（逻辑删除） */
+    @RequirePermission("master:process:delete")
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@PathVariable Long id) {
         processService.delete(id);

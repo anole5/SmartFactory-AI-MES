@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartfactory.mes.auth.entity.SysUser;
 import com.smartfactory.mes.auth.enums.UserStatus;
 import com.smartfactory.mes.auth.mapper.SysUserMapper;
+import com.smartfactory.mes.auth.service.PermissionService;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.ResultCode;
 import io.jsonwebtoken.Claims;
@@ -12,19 +13,22 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.io.IOException;
 
 /**
- * 登录鉴权拦截器：解析 Bearer token → 校验用户 → 放入 CurrentUserContext
+ * 登录鉴权拦截器：解析 Bearer token → 校验用户 → 校验 @RequirePermission → 放入 CurrentUserContext
  *
  * <p>与 Spring Security 方案的对比（面试可讲）：自研拦截器链路透明可控——
  * 白名单、401/403 响应、ThreadLocal 传递都显式可见，学习项目首选；
  * 生产级系统一般用 Spring Security（过滤器链 + AuthenticationManager 体系）。</p>
  *
- * <p>性能说明：每次请求查一次 sys_user（T4 起还有权限 join 查询），
- * 演示规模无压力；生产环境应用 Redis 缓存「用户 + 权限」，权限变更时删缓存。</p>
+ * <p>性能说明：每次请求查一次 sys_user；仅带 @RequirePermission 的接口
+ * 再查一次权限 join（演示规模无压力）。生产环境应用 Redis 缓存「用户 + 权限」，
+ * 权限变更时删缓存——对比「权限塞 JWT claims」的无状态方案：本方案权限变更即时生效、
+ * token 更小，代价是每请求多一次查询。</p>
  */
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
@@ -33,11 +37,14 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final SysUserMapper sysUserMapper;
+    private final PermissionService permissionService;
     private final ObjectMapper objectMapper;
 
-    public AuthInterceptor(JwtUtil jwtUtil, SysUserMapper sysUserMapper, ObjectMapper objectMapper) {
+    public AuthInterceptor(JwtUtil jwtUtil, SysUserMapper sysUserMapper,
+                           PermissionService permissionService, ObjectMapper objectMapper) {
         this.jwtUtil = jwtUtil;
         this.sysUserMapper = sysUserMapper;
+        this.permissionService = permissionService;
         this.objectMapper = objectMapper;
     }
 
@@ -50,7 +57,8 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         String authHeader = request.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
-            writeUnauthorized(response, "未登录或登录已过期");
+            writeJson(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    ApiResult.error(ResultCode.UNAUTHORIZED, "未登录或登录已过期"));
             return false;
         }
         try {
@@ -59,13 +67,23 @@ public class AuthInterceptor implements HandlerInterceptor {
             // 校验用户仍存在且启用：停用/删除后即使 token 未过期也拒绝
             SysUser user = sysUserMapper.selectById(userId);
             if (user == null || user.getStatus() != UserStatus.ENABLED) {
-                writeUnauthorized(response, "账号不存在或已停用");
+                writeJson(response, HttpServletResponse.SC_UNAUTHORIZED,
+                        ApiResult.error(ResultCode.UNAUTHORIZED, "账号不存在或已停用"));
+                return false;
+            }
+            // 权限校验：仅带 @RequirePermission 的接口查权限集合（方法优先，其次类）
+            String required = resolveRequiredPermission(handler);
+            if (required != null && !permissionService.hasPerm(userId, required)) {
+                writeJson(response, HttpServletResponse.SC_FORBIDDEN,
+                        ApiResult.error(ResultCode.FORBIDDEN,
+                                "无权限访问，需要权限标识: " + required));
                 return false;
             }
             CurrentUserContext.set(new LoginUser(user.getId(), user.getUsername(), user.getRealName()));
             return true;
         } catch (JwtException | IllegalArgumentException e) {
-            writeUnauthorized(response, "未登录或登录已过期");
+            writeJson(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    ApiResult.error(ResultCode.UNAUTHORIZED, "未登录或登录已过期"));
             return false;
         }
     }
@@ -77,11 +95,24 @@ public class AuthInterceptor implements HandlerInterceptor {
         CurrentUserContext.clear();
     }
 
-    /** 401 直写 JSON：复用 ApiResult 结构；显式 charset=UTF-8 否则中文乱码 */
-    private void writeUnauthorized(HttpServletResponse response, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    /** 从处理方法（或所在类）上取 @RequirePermission 的权限标识；未标注则返回 null（不校验） */
+    private String resolveRequiredPermission(Object handler) {
+        if (!(handler instanceof HandlerMethod handlerMethod)) {
+            return null;
+        }
+        RequirePermission methodAnn = handlerMethod.getMethodAnnotation(RequirePermission.class);
+        if (methodAnn != null) {
+            return methodAnn.value();
+        }
+        RequirePermission classAnn = handlerMethod.getBeanType().getAnnotation(RequirePermission.class);
+        return classAnn == null ? null : classAnn.value();
+    }
+
+    /** 直写 JSON：复用 ApiResult 结构；显式 charset=UTF-8 否则中文乱码 */
+    private void writeJson(HttpServletResponse response, int httpStatus, ApiResult<Void> body)
+            throws IOException {
+        response.setStatus(httpStatus);
         response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(objectMapper.writeValueAsString(
-                ApiResult.error(ResultCode.UNAUTHORIZED, message)));
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 }

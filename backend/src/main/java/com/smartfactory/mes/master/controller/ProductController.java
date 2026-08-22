@@ -1,5 +1,6 @@
 package com.smartfactory.mes.master.controller;
 
+import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.api.StatusUpdateDTO;
@@ -43,12 +44,14 @@ public class ProductController {
     }
 
     /** 创建产品 */
+    @RequirePermission("master:product:create")
     @PostMapping
     public ApiResult<Long> create(@Valid @RequestBody ProductSaveDTO dto) {
         return ApiResult.success(productService.create(dto));
     }
 
     /** 更新产品 */
+    @RequirePermission("master:product:update")
     @PutMapping("/{id}")
     public ApiResult<Void> update(@PathVariable Long id, @Valid @RequestBody ProductSaveDTO dto) {
         productService.update(id, dto);
@@ -56,6 +59,7 @@ public class ProductController {
     }
 
     /** 启停用产品 */
+    @RequirePermission("master:product:status")
     @PutMapping("/{id}/status")
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusUpdateDTO dto) {
         productService.changeStatus(id, dto.getStatus());
@@ -63,6 +67,7 @@ public class ProductController {
     }
 
     /** 删除产品（逻辑删除） */
+    @RequirePermission("master:product:delete")
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@PathVariable Long id) {
         productService.delete(id);

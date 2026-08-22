@@ -8,6 +8,7 @@ import com.smartfactory.mes.auth.entity.SysUser;
 import com.smartfactory.mes.auth.enums.UserStatus;
 import com.smartfactory.mes.auth.mapper.SysUserMapper;
 import com.smartfactory.mes.auth.service.AuthService;
+import com.smartfactory.mes.auth.service.PermissionService;
 import com.smartfactory.mes.common.api.ResultCode;
 import com.smartfactory.mes.common.exception.BusinessException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -26,10 +27,13 @@ public class AuthServiceImpl implements AuthService {
 
     private final SysUserMapper sysUserMapper;
     private final JwtUtil jwtUtil;
+    private final PermissionService permissionService;
 
-    public AuthServiceImpl(SysUserMapper sysUserMapper, JwtUtil jwtUtil) {
+    public AuthServiceImpl(SysUserMapper sysUserMapper, JwtUtil jwtUtil,
+                           PermissionService permissionService) {
         this.sysUserMapper = sysUserMapper;
         this.jwtUtil = jwtUtil;
+        this.permissionService = permissionService;
     }
 
     @Override
@@ -44,9 +48,11 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.UNAUTHORIZED, "账号已停用");
         }
         String token = jwtUtil.generate(user.getId(), user.getUsername());
-        // 角色/权限集合 T4 RBAC 落库后填充（现在返回空集合，前端结构已兼容）
+        // 角色/权限集合随登录下发：前端据此做按钮级显示控制（v-permission）
+        List<String> roles = permissionService.listRoleCodes(user.getId());
+        List<String> permissions = permissionService.listPerms(user.getId());
         return new LoginVO(token, user.getUsername(), user.getId(), user.getRealName(),
-                List.of(), List.of());
+                roles, permissions);
     }
 
     @Override
