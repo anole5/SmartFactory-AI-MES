@@ -151,11 +151,22 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
             default:
                 throw new BusinessException("当前状态不允许取消: " + wo.getStatus().getLabel());
         }
-        // TODO T7：级联取消未完成工序任务（任务表逻辑就位后回填）
         wo.setStatus(WorkOrderStatus.CANCELLED);
         this.updateById(wo);
+        // 级联取消未完成任务（PENDING/ASSIGNED/RUNNING/PAUSED -> CANCELLED），已完成任务保留历史
+        long cascadeCount = operationTaskMapper.selectCount(new LambdaQueryWrapper<MesOperationTask>()
+                .eq(MesOperationTask::getWorkOrderId, id)
+                .in(MesOperationTask::getStatus, TaskStatus.PENDING, TaskStatus.ASSIGNED,
+                        TaskStatus.RUNNING, TaskStatus.PAUSED));
+        if (cascadeCount > 0) {
+            operationTaskMapper.update(null, new LambdaUpdateWrapper<MesOperationTask>()
+                    .eq(MesOperationTask::getWorkOrderId, id)
+                    .in(MesOperationTask::getStatus, TaskStatus.PENDING, TaskStatus.ASSIGNED,
+                            TaskStatus.RUNNING, TaskStatus.PAUSED)
+                    .set(MesOperationTask::getStatus, TaskStatus.CANCELLED));
+        }
         traceService.write(wo.getId(), null, ActionType.CANCEL,
-                Map.of("workOrderNo", wo.getWorkOrderNo()));
+                Map.of("workOrderNo", wo.getWorkOrderNo(), "cancelledTaskCount", cascadeCount));
     }
 
     @Override
