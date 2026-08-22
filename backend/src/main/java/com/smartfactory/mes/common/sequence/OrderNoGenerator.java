@@ -58,6 +58,16 @@ public class OrderNoGenerator {
         return next("TRC");
     }
 
+    /** BOM 单号，如 BOM202608230001（第 2 周起替换时间戳格式） */
+    public String nextBomNo() {
+        return next("BOM");
+    }
+
+    /** 工艺路线单号，如 RT202608230001（第 2 周起替换时间戳格式） */
+    public String nextRouteNo() {
+        return next("RT");
+    }
+
     /**
      * 三步原子取号（见类注释，必须同事务保证同连接）：
      * ① INSERT IGNORE 补当日行 ② UPDATE 原子自增并写 LAST_INSERT_ID ③ SELECT 取回

@@ -1,11 +1,13 @@
 package com.smartfactory.mes.master.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartfactory.mes.common.api.EnumUtils;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
+import com.smartfactory.mes.common.sequence.OrderNoGenerator;
 import com.smartfactory.mes.master.dto.RouteQueryDTO;
 import com.smartfactory.mes.master.dto.RouteSaveDTO;
 import com.smartfactory.mes.master.dto.RouteStepVO;
@@ -27,8 +29,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -42,20 +42,20 @@ import java.util.stream.Collectors;
 @Service
 public class RouteServiceImpl extends ServiceImpl<RouteMapper, MesRoute> implements RouteService {
 
-    /** 工艺路线编号格式：RT + 时间戳（演示用；正式单号生成器第 2 周做） */
-    private static final DateTimeFormatter ROUTE_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
-
     private final RouteStepMapper routeStepMapper;
     private final ProductMapper productMapper;
     private final ProcessMapper processMapper;
     private final WorkstationMapper workstationMapper;
+    private final OrderNoGenerator orderNoGenerator;
 
     public RouteServiceImpl(RouteStepMapper routeStepMapper, ProductMapper productMapper,
-                            ProcessMapper processMapper, WorkstationMapper workstationMapper) {
+                            ProcessMapper processMapper, WorkstationMapper workstationMapper,
+                            OrderNoGenerator orderNoGenerator) {
         this.routeStepMapper = routeStepMapper;
         this.productMapper = productMapper;
         this.processMapper = processMapper;
         this.workstationMapper = workstationMapper;
+        this.orderNoGenerator = orderNoGenerator;
     }
 
     @Override
@@ -97,7 +97,7 @@ public class RouteServiceImpl extends ServiceImpl<RouteMapper, MesRoute> impleme
     public Long create(RouteSaveDTO dto) {
         MesRoute route = new MesRoute();
         applyHeader(route, dto);
-        route.setRouteNo("RT" + ROUTE_NO_FORMATTER.format(LocalDateTime.now()));
+        route.setRouteNo(orderNoGenerator.nextRouteNo());
         route.setStatus(RouteStatus.DRAFT);
         this.save(route);
         saveSteps(route.getId(), dto.getSteps());
@@ -135,7 +135,14 @@ public class RouteServiceImpl extends ServiceImpl<RouteMapper, MesRoute> impleme
             if (product == null || product.getStatus() != ProductStatus.ENABLED) {
                 throw new BusinessException("产品未启用，不能激活工艺路线");
             }
-            // TODO 第 2 周版本升级：激活新版本时自动作废同产品旧版本
+            if (draftToActive) {
+                // 升版联动：同产品只能有一个生效版本，激活新版本时自动作废同产品其他生效版本
+                this.baseMapper.update(null, new LambdaUpdateWrapper<MesRoute>()
+                        .eq(MesRoute::getProductId, route.getProductId())
+                        .eq(MesRoute::getStatus, RouteStatus.ACTIVE)
+                        .ne(MesRoute::getId, route.getId())
+                        .set(MesRoute::getStatus, RouteStatus.OBSOLETE));
+            }
         }
         route.setStatus(target);
         this.updateById(route);

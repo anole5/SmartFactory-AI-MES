@@ -1,11 +1,13 @@
 package com.smartfactory.mes.master.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartfactory.mes.common.api.EnumUtils;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
+import com.smartfactory.mes.common.sequence.OrderNoGenerator;
 import com.smartfactory.mes.master.dto.BomItemVO;
 import com.smartfactory.mes.master.dto.BomQueryDTO;
 import com.smartfactory.mes.master.dto.BomSaveDTO;
@@ -26,8 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -41,17 +41,17 @@ import java.util.stream.Collectors;
 @Service
 public class BomServiceImpl extends ServiceImpl<BomMapper, MesBom> implements BomService {
 
-    /** BOM 编号格式：BOM + 时间戳（演示用；正式单号生成器第 2 周做） */
-    private static final DateTimeFormatter BOM_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
-
     private final BomItemMapper bomItemMapper;
     private final ProductMapper productMapper;
     private final MaterialMapper materialMapper;
+    private final OrderNoGenerator orderNoGenerator;
 
-    public BomServiceImpl(BomItemMapper bomItemMapper, ProductMapper productMapper, MaterialMapper materialMapper) {
+    public BomServiceImpl(BomItemMapper bomItemMapper, ProductMapper productMapper,
+                          MaterialMapper materialMapper, OrderNoGenerator orderNoGenerator) {
         this.bomItemMapper = bomItemMapper;
         this.productMapper = productMapper;
         this.materialMapper = materialMapper;
+        this.orderNoGenerator = orderNoGenerator;
     }
 
     @Override
@@ -88,7 +88,7 @@ public class BomServiceImpl extends ServiceImpl<BomMapper, MesBom> implements Bo
     public Long create(BomSaveDTO dto) {
         MesBom bom = new MesBom();
         applyHeader(bom, dto);
-        bom.setBomNo("BOM" + BOM_NO_FORMATTER.format(LocalDateTime.now()));
+        bom.setBomNo(orderNoGenerator.nextBomNo());
         bom.setStatus(BomStatus.DRAFT);
         this.save(bom);
         saveItems(bom.getId(), dto.getItems());
@@ -127,7 +127,14 @@ public class BomServiceImpl extends ServiceImpl<BomMapper, MesBom> implements Bo
             if (product == null || product.getStatus() != ProductStatus.ENABLED) {
                 throw new BusinessException("产品未启用，不能激活 BOM");
             }
-            // TODO 第 2 周版本升级：激活新版本时自动作废同产品旧版本
+            if (draftToActive) {
+                // 升版联动：同产品只能有一个生效版本，激活新版本时自动作废同产品其他生效版本
+                this.baseMapper.update(null, new LambdaUpdateWrapper<MesBom>()
+                        .eq(MesBom::getProductId, bom.getProductId())
+                        .eq(MesBom::getStatus, BomStatus.ACTIVE)
+                        .ne(MesBom::getId, bom.getId())
+                        .set(MesBom::getStatus, BomStatus.OBSOLETE));
+            }
         }
         bom.setStatus(target);
         this.updateById(bom);
