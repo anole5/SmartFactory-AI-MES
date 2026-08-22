@@ -12,7 +12,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 各模块 Controller/Service/Mapper/Entity/DTO 分层，通过 Service 接口调用，不跨模块直接操作表。</p>
  */
 @SpringBootApplication
-@MapperScan("com.smartfactory.mes.master.mapper")
+@MapperScan("com.smartfactory.mes.**.mapper")
 public class SmartFactoryMesApplication {
 
     public static void main(String[] args) {
