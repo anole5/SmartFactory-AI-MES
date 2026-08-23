@@ -4,8 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smartfactory.mes.auth.JwtUtil;
 import com.smartfactory.mes.auth.dto.LoginDTO;
 import com.smartfactory.mes.auth.dto.LoginVO;
+import com.smartfactory.mes.auth.dto.MenuNodeVO;
+import com.smartfactory.mes.auth.entity.SysMenu;
 import com.smartfactory.mes.auth.entity.SysUser;
 import com.smartfactory.mes.auth.enums.UserStatus;
+import com.smartfactory.mes.auth.mapper.SysMenuMapper;
 import com.smartfactory.mes.auth.mapper.SysUserMapper;
 import com.smartfactory.mes.auth.service.AuthService;
 import com.smartfactory.mes.auth.service.PermissionService;
@@ -14,10 +17,14 @@ import com.smartfactory.mes.common.exception.BusinessException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 认证服务实现：真实登录（替换第 1 周固定 token）
+ * 认证服务实现：真实登录（替换第 1 周固定 token）+ 用户菜单树（第 5 周动态路由）
  */
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -26,12 +33,14 @@ public class AuthServiceImpl implements AuthService {
     private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
 
     private final SysUserMapper sysUserMapper;
+    private final SysMenuMapper sysMenuMapper;
     private final JwtUtil jwtUtil;
     private final PermissionService permissionService;
 
-    public AuthServiceImpl(SysUserMapper sysUserMapper, JwtUtil jwtUtil,
-                           PermissionService permissionService) {
+    public AuthServiceImpl(SysUserMapper sysUserMapper, SysMenuMapper sysMenuMapper,
+                           JwtUtil jwtUtil, PermissionService permissionService) {
         this.sysUserMapper = sysUserMapper;
+        this.sysMenuMapper = sysMenuMapper;
         this.jwtUtil = jwtUtil;
         this.permissionService = permissionService;
     }
@@ -60,5 +69,46 @@ public class AuthServiceImpl implements AuthService {
         return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getStatus, UserStatus.ENABLED)
                 .orderByAsc(SysUser::getId));
+    }
+
+    @Override
+    public List<MenuNodeVO> listMenus(Long userId) {
+        // SUPER_ADMIN 直接给全量启用菜单（角色授权表对它无意义），其余角色按授权过滤
+        List<SysMenu> menus;
+        if (permissionService.listRoleCodes(userId).contains("SUPER_ADMIN")) {
+            menus = sysMenuMapper.selectList(new LambdaQueryWrapper<SysMenu>()
+                    .in(SysMenu::getMenuType, "M", "C")
+                    .eq(SysMenu::getStatus, UserStatus.ENABLED)
+                    .orderByAsc(SysMenu::getOrderNum)
+                    .orderByAsc(SysMenu::getId));
+        } else {
+            menus = sysMenuMapper.listMenusByUserId(userId);
+        }
+        return buildTree(menus);
+    }
+
+    /**
+     * 内存组树：查询已按 order_num 排序，LinkedHashMap 保序；
+     * parentId 0 或父节点不在结果集（数据异常兜底）的节点都挂根。
+     */
+    private List<MenuNodeVO> buildTree(List<SysMenu> menus) {
+        if (menus.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, MenuNodeVO> nodeMap = new LinkedHashMap<>();
+        for (SysMenu menu : menus) {
+            nodeMap.put(menu.getId(), MenuNodeVO.of(menu));
+        }
+        List<MenuNodeVO> roots = new ArrayList<>();
+        for (SysMenu menu : menus) {
+            MenuNodeVO node = nodeMap.get(menu.getId());
+            Long parentId = menu.getParentId();
+            if (parentId == null || parentId == 0 || !nodeMap.containsKey(parentId)) {
+                roots.add(node);
+            } else {
+                nodeMap.get(parentId).getChildren().add(node);
+            }
+        }
+        return roots;
     }
 }

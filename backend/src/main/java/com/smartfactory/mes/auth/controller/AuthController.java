@@ -1,7 +1,9 @@
 package com.smartfactory.mes.auth.controller;
 
+import com.smartfactory.mes.auth.CurrentUserContext;
 import com.smartfactory.mes.auth.dto.LoginDTO;
 import com.smartfactory.mes.auth.dto.LoginVO;
+import com.smartfactory.mes.auth.dto.MenuNodeVO;
 import com.smartfactory.mes.auth.entity.SysUser;
 import com.smartfactory.mes.auth.service.AuthService;
 import com.smartfactory.mes.common.api.ApiResult;
@@ -37,5 +39,15 @@ public class AuthController {
     @GetMapping("/users")
     public ApiResult<List<SysUser>> users() {
         return ApiResult.success(authService.listEnabledUsers());
+    }
+
+    /**
+     * 当前用户菜单树（第 5 周前端动态路由数据源）。
+     * 登录即可取本人菜单（经鉴权拦截器保护），接口本身不加 @RequirePermission；
+     * 树内容由 service 按角色过滤，后端权限注解仍是接口级真防线。
+     */
+    @GetMapping("/menus")
+    public ApiResult<List<MenuNodeVO>> menus() {
+        return ApiResult.success(authService.listMenus(CurrentUserContext.get().getId()));
     }
 }
