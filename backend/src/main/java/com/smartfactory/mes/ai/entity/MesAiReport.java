@@ -18,6 +18,9 @@ public class MesAiReport extends BaseEntity {
     /** 报告日期 */
     private LocalDate reportDate;
 
+    /** 报表类型：DAY 日报 / WEEK 周报（第 7 周） */
+    private String reportType;
+
     /** 报告正文（AI 润色后的日报内容） */
     private String content;
 }

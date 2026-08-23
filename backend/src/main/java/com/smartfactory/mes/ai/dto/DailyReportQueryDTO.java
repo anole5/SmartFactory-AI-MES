@@ -17,4 +17,7 @@ public class DailyReportQueryDTO extends PageQuery {
     /** 报告日期（可空，不传查全部） */
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
     private LocalDate reportDate;
+
+    /** 报表类型：DAY/WEEK（不传服务层默认 DAY——向后兼容旧调用） */
+    private String reportType;
 }

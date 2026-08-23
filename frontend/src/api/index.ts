@@ -71,6 +71,8 @@ import type {
   TaskQuery,
   TraceRecord,
   UserOption,
+  WeeklyPreview,
+  WeeklyReportSave,
   WorkOrder,
   WorkOrderQuery,
   WorkOrderSave,
@@ -301,6 +303,12 @@ export const dailyApi = {
   page: (params: DailyReportQuery) => httpGet<PageResult<DailyReport>>('/ai/daily/page', params),
   preview: (reportDate: string) => httpPost<DailyPreview>('/ai/daily/preview', { reportDate }),
   save: (data: DailyReportSave) => httpPost<void>('/ai/daily/save', data),
+}
+
+// ---------- AI 周报（第 7 周：近两周趋势 + 环比，pro 档生成，不走流式） ----------
+export const weeklyApi = {
+  preview: (endDate: string) => httpPost<WeeklyPreview>('/ai/weekly/preview', { endDate }),
+  save: (data: WeeklyReportSave) => httpPost<void>('/ai/weekly/save', data),
 }
 
 // ---------- 系统集成：ERP 外部订单（第 5 周） ----------

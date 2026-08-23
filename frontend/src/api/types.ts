@@ -826,6 +826,7 @@ export interface DailyPreview {
 export interface DailyReport {
   id: string
   reportDate: string
+  reportType?: string
   content: string
   createdAt?: string
   updatedAt?: string
@@ -838,6 +839,20 @@ export interface DailyReportSave {
 
 export interface DailyReportQuery extends PageQuery {
   reportDate?: string
+  reportType?: string
+}
+
+// ---------- AI 周报（第 7 周，复用日报权限，不加新菜单） ----------
+export interface WeeklyPreview {
+  endDate: string
+  content: string
+  summary?: string
+  fallback?: boolean
+}
+
+export interface WeeklyReportSave {
+  endDate: string
+  content: string
 }
 
 // ---------- 系统集成：ERP 外部订单（第 5 周） ----------

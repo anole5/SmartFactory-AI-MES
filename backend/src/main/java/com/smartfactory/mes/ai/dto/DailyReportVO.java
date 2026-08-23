@@ -16,6 +16,7 @@ public class DailyReportVO {
 
     private Long id;
     private LocalDate reportDate;
+    private String reportType;
     private String content;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -24,6 +25,7 @@ public class DailyReportVO {
         DailyReportVO vo = new DailyReportVO();
         vo.setId(entity.getId());
         vo.setReportDate(entity.getReportDate());
+        vo.setReportType(entity.getReportType());
         vo.setContent(entity.getContent());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());

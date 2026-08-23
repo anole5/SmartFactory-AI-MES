@@ -133,14 +133,17 @@ public class DailyReportServiceImpl extends ServiceImpl<AiReportMapper, MesAiRep
     @Override
     @Transactional
     public void save(LocalDate reportDate, String content) {
+        // 第 7 周：同日可并存日报(DAY)/周报(WEEK)各一条，save 必须限定 reportType 防互相覆盖
         MesAiReport existing = this.getOne(new LambdaQueryWrapper<MesAiReport>()
-                .eq(MesAiReport::getReportDate, reportDate), false);
+                .eq(MesAiReport::getReportDate, reportDate)
+                .eq(MesAiReport::getReportType, "DAY"), false);
         if (existing != null) {
             existing.setContent(content);
             this.updateById(existing);
         } else {
             MesAiReport entity = new MesAiReport();
             entity.setReportDate(reportDate);
+            entity.setReportType("DAY");
             entity.setContent(content);
             this.save(entity);
         }
@@ -148,8 +151,12 @@ public class DailyReportServiceImpl extends ServiceImpl<AiReportMapper, MesAiRep
 
     @Override
     public PageResult<DailyReportVO> page(DailyReportQueryDTO query) {
+        // 不传 reportType 默认 DAY：旧调用（冒烟 16.5 等）只看到日报，WEEK 记录不混入
+        String reportType = query.getReportType() == null || query.getReportType().isBlank()
+                ? "DAY" : query.getReportType();
         LambdaQueryWrapper<MesAiReport> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(query.getReportDate() != null, MesAiReport::getReportDate, query.getReportDate())
+        wrapper.eq(MesAiReport::getReportType, reportType)
+                .eq(query.getReportDate() != null, MesAiReport::getReportDate, query.getReportDate())
                 .orderByDesc(MesAiReport::getReportDate);
         Page<MesAiReport> page = this.page(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
         List<DailyReportVO> vos = page.getRecords().stream()
