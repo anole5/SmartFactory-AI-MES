@@ -3,6 +3,8 @@ package com.smartfactory.mes.ai.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartfactory.mes.ai.exception.AiServiceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -25,12 +27,15 @@ import java.util.Map;
 @Component
 public class DeepSeekClient {
 
+    private static final Logger log = LoggerFactory.getLogger(DeepSeekClient.class);
+
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final String apiKey;
     private final String fastModel;
     private final String proModel;
-    private final int maxTokens;
+    private final int maxFastTokens;
+    private final int maxProTokens;
 
     public DeepSeekClient(ObjectMapper objectMapper,
                           @Value("${ai.deepseek.base-url:https://api.deepseek.com}") String baseUrl,
@@ -38,12 +43,14 @@ public class DeepSeekClient {
                           @Value("${ai.deepseek.fast-model:deepseek-v4-flash}") String fastModel,
                           @Value("${ai.deepseek.pro-model:deepseek-v4-pro}") String proModel,
                           @Value("${ai.deepseek.timeout-seconds:60}") int timeoutSeconds,
-                          @Value("${ai.deepseek.max-tokens:1500}") int maxTokens) {
+                          @Value("${ai.deepseek.max-tokens-fast:1500}") int maxFastTokens,
+                          @Value("${ai.deepseek.max-tokens-pro:8000}") int maxProTokens) {
         this.objectMapper = objectMapper;
         this.apiKey = apiKey;
         this.fastModel = fastModel;
         this.proModel = proModel;
-        this.maxTokens = maxTokens;
+        this.maxFastTokens = maxFastTokens;
+        this.maxProTokens = maxProTokens;
         // JDK HttpURLConnection 请求工厂：显式连接/读取超时，LLM 推理可能较慢（pro 档数秒到数十秒）
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(5_000);
@@ -56,12 +63,12 @@ public class DeepSeekClient {
 
     /** 快档调用（flash）：高频轻任务 */
     public String chatFast(String systemPrompt, String userPrompt) {
-        return chat(fastModel, systemPrompt, userPrompt, maxTokens);
+        return chat(fastModel, systemPrompt, userPrompt, maxFastTokens);
     }
 
-    /** 强档调用（pro）：重推理任务 */
+    /** 强档调用（pro）：重推理任务（推理模型的 reasoning 会吃 token 预算，额度给足） */
     public String chatPro(String systemPrompt, String userPrompt) {
-        return chat(proModel, systemPrompt, userPrompt, maxTokens);
+        return chat(proModel, systemPrompt, userPrompt, maxProTokens);
     }
 
     private String chat(String model, String systemPrompt, String userPrompt, int tokens) {
@@ -84,9 +91,14 @@ public class DeepSeekClient {
                     .retrieve()
                     .body(String.class);
             JsonNode root = objectMapper.readTree(response);
-            JsonNode content = root.path("choices").path(0).path("message").path("content");
+            JsonNode message = root.path("choices").path(0).path("message");
+            JsonNode content = message.path("content");
             if (content.isMissingNode() || content.asText().isBlank()) {
-                throw new AiServiceException("DeepSeek 返回内容为空: " + root.path("model").asText());
+                // 推理模型（pro 档）reasoning 吃满预算时 content 为空：调大 ai.deepseek.max-tokens-pro
+                boolean reasoning = message.hasNonNull("reasoning_content");
+                log.warn("DeepSeek 返回内容为空: model={}, hasReasoning={}", root.path("model").asText(), reasoning);
+                throw new AiServiceException("DeepSeek 返回内容为空: " + root.path("model").asText()
+                        + (reasoning ? "（推理未完成，max-tokens 不足）" : ""));
             }
             return content.asText().trim();
         } catch (AiServiceException e) {

@@ -24,7 +24,9 @@ ai:
     fast-model: deepseek-v4-flash
     pro-model: deepseek-v4-pro
     timeout-seconds: 60
-    max-tokens: 1500
+    # flash 快档轻任务 1500 够用；pro 是推理模型，reasoning 会吃预算，给 8000（实测推理 3k + 回答 1.4k）
+    max-tokens-fast: 1500
+    max-tokens-pro: 8000
 
 spring:
   application:

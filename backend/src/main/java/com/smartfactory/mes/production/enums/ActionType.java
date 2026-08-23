@@ -23,7 +23,8 @@ public enum ActionType {
     DEFECT("DEFECT", "不良登记"),
     EXCEPTION_CREATE("EXCEPTION_CREATE", "异常单创建"),
     EXCEPTION_PROCESS("EXCEPTION_PROCESS", "异常处理"),
-    EXCEPTION_CLOSE("EXCEPTION_CLOSE", "异常关闭");
+    EXCEPTION_CLOSE("EXCEPTION_CLOSE", "异常关闭"),
+    AI_SUGGEST("AI_SUGGEST", "AI 处理建议回写");
 
     @EnumValue
     @JsonValue
