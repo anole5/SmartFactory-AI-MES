@@ -1,5 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useMenuStore } from '@/stores/menu'
 
+/**
+ * 静态骨架（第 5 周动态路由改造后）：仅登录页 + 布局根路由。
+ * 业务页不再静态注册——登录后由 stores/menu 按后端菜单树动态 addRoute。
+ * '/' redirect 改 '/dashboard'：动态化后 operator/qa 无产品菜单，原 '/products' 是死链，
+ * 生产看板（205）全角色都有。
+ */
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -11,159 +18,34 @@ const router = createRouter({
     },
     {
       path: '/',
+      name: 'layout',
       component: () => import('@/layout/index.vue'),
-      redirect: '/products',
-      children: [
-        {
-          path: 'products',
-          name: 'products',
-          component: () => import('@/views/products/index.vue'),
-          meta: { title: '产品管理' },
-        },
-        {
-          path: 'materials',
-          name: 'materials',
-          component: () => import('@/views/materials/index.vue'),
-          meta: { title: '物料管理' },
-        },
-        {
-          path: 'processes',
-          name: 'processes',
-          component: () => import('@/views/processes/index.vue'),
-          meta: { title: '工序管理' },
-        },
-        {
-          path: 'workstations',
-          name: 'workstations',
-          component: () => import('@/views/workstations/index.vue'),
-          meta: { title: '工位管理' },
-        },
-        {
-          path: 'boms',
-          name: 'boms',
-          component: () => import('@/views/boms/index.vue'),
-          meta: { title: 'BOM 管理' },
-        },
-        {
-          path: 'routes',
-          name: 'routes',
-          component: () => import('@/views/routes/index.vue'),
-          meta: { title: '工艺路线' },
-        },
-        {
-          path: 'equipment',
-          name: 'equipment',
-          component: () => import('@/views/equipment/index.vue'),
-          meta: { title: '设备管理' },
-        },
-        {
-          path: 'work-orders',
-          name: 'work-orders',
-          component: () => import('@/views/work-orders/index.vue'),
-          meta: { title: '生产工单' },
-        },
-        {
-          path: 'tasks',
-          name: 'tasks',
-          component: () => import('@/views/tasks/index.vue'),
-          meta: { title: '工序任务' },
-        },
-        {
-          path: 'reports',
-          name: 'reports',
-          component: () => import('@/views/reports/index.vue'),
-          meta: { title: '报工记录' },
-        },
-        {
-          path: 'inspection-tasks',
-          name: 'inspection-tasks',
-          component: () => import('@/views/inspection-tasks/index.vue'),
-          meta: { title: '质检任务' },
-        },
-        {
-          path: 'defects',
-          name: 'defects',
-          component: () => import('@/views/defects/index.vue'),
-          meta: { title: '不良记录' },
-        },
-        {
-          path: 'exceptions',
-          name: 'exceptions',
-          component: () => import('@/views/exceptions/index.vue'),
-          meta: { title: '异常管理' },
-        },
-        {
-          path: 'ai-chat',
-          name: 'ai-chat',
-          component: () => import('@/views/ai-chat/index.vue'),
-          meta: { title: 'AI 助手' },
-        },
-        {
-          path: 'knowledge',
-          name: 'knowledge',
-          component: () => import('@/views/knowledge/index.vue'),
-          meta: { title: '工厂知识库' },
-        },
-        {
-          path: 'ai-assistant',
-          name: 'ai-assistant',
-          component: () => import('@/views/ai-assistant/index.vue'),
-          meta: { title: '异常建议助手' },
-        },
-        {
-          path: 'ai-daily',
-          name: 'ai-daily',
-          component: () => import('@/views/ai-daily/index.vue'),
-          meta: { title: '生产日报助手' },
-        },
-        {
-          path: 'traces',
-          name: 'traces',
-          component: () => import('@/views/traces/index.vue'),
-          meta: { title: '追溯查询' },
-        },
-        {
-          path: 'dashboard',
-          name: 'dashboard',
-          component: () => import('@/views/dashboard/index.vue'),
-          meta: { title: '生产看板' },
-        },
-        {
-          path: 'tv-demo',
-          name: 'tv-demo',
-          component: () => import('@/views/tv-demo/index.vue'),
-          meta: { title: '电视 Demo' },
-        },
-        {
-          path: 'erp-orders',
-          name: 'erp-orders',
-          component: () => import('@/views/erp-orders/index.vue'),
-          meta: { title: 'ERP 订单' },
-        },
-        {
-          path: 'inventory',
-          name: 'inventory',
-          component: () => import('@/views/inventory/index.vue'),
-          meta: { title: 'WMS 库存' },
-        },
-      ],
+      redirect: '/dashboard',
+      children: [],
     },
   ],
 })
 
-// 全局前置守卫：无 token 跳登录页（第 2 周改为校验后端接口的 401 响应 + 权限菜单）
-router.beforeEach((to) => {
+// 全局前置守卫：无 token 跳登录页；登录后首次导航拉菜单树并注册动态路由
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('mes_token')
-  if (to.path !== '/login' && !token) {
+  if (to.path === '/login') {
+    return token ? { path: '/' } : true
+  }
+  if (!token) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
-  if (to.path === '/login' && token) {
-    return { path: '/' }
+  // 守卫回调体内取 store：store 与 router 相互引用，顶层取用会踩模块初始化时序
+  const menuStore = useMenuStore()
+  if (!menuStore.loaded) {
+    await menuStore.init()
+    // 关键一步：注册完成后带着原目标重新进守卫（redirect/动态路由都需重新解析）
+    return { ...to, replace: true }
   }
   return true
 })
 
-// 页面标题
+// 页面标题（动态路由的 meta.title 来自后端菜单名）
 router.afterEach((to) => {
   const title = to.meta.title as string | undefined
   document.title = title ? `${title} - SmartFactory MES` : 'SmartFactory MES'

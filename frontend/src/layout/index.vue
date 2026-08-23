@@ -13,94 +13,16 @@
         text-color="rgba(255,255,255,0.68)"
         active-text-color="#ffffff"
       >
-        <el-menu-item index="/products">
-          <el-icon><Goods /></el-icon><span>产品管理</span>
-        </el-menu-item>
-        <el-menu-item index="/materials">
-          <el-icon><Box /></el-icon><span>物料管理</span>
-        </el-menu-item>
-        <el-menu-item index="/processes">
-          <el-icon><SetUp /></el-icon><span>工序管理</span>
-        </el-menu-item>
-        <el-menu-item index="/workstations">
-          <el-icon><Monitor /></el-icon><span>工位管理</span>
-        </el-menu-item>
-        <el-menu-item index="/boms">
-          <el-icon><List /></el-icon><span>BOM 管理</span>
-        </el-menu-item>
-        <el-menu-item index="/routes">
-          <el-icon><Connection /></el-icon><span>工艺路线</span>
-        </el-menu-item>
-        <el-menu-item index="/equipment">
-          <el-icon><Cpu /></el-icon><span>设备管理</span>
-        </el-menu-item>
-        <el-menu-item index="/work-orders">
-          <el-icon><Tickets /></el-icon><span>生产工单</span>
-        </el-menu-item>
-        <el-menu-item index="/tasks">
-          <el-icon><Operation /></el-icon><span>工序任务</span>
-        </el-menu-item>
-        <el-menu-item index="/reports">
-          <el-icon><DataLine /></el-icon><span>报工记录</span>
-        </el-menu-item>
-        <el-sub-menu index="quality">
-          <template #title>
-            <el-icon><Stamp /></el-icon><span>质量管理</span>
-          </template>
-          <el-menu-item index="/inspection-tasks">
-            <el-icon><CircleCheck /></el-icon><span>质检任务</span>
-          </el-menu-item>
-          <el-menu-item index="/defects">
-            <el-icon><WarningFilled /></el-icon><span>不良记录</span>
-          </el-menu-item>
-          <el-menu-item index="/exceptions">
-            <el-icon><Bell /></el-icon><span>异常管理</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="ai">
-          <template #title>
-            <el-icon><MagicStick /></el-icon><span>AI 应用</span>
-          </template>
-          <el-menu-item index="/ai-chat">
-            <el-icon><ChatDotRound /></el-icon><span>AI 助手</span>
-          </el-menu-item>
-          <el-menu-item index="/knowledge">
-            <el-icon><Collection /></el-icon><span>工厂知识库</span>
-          </el-menu-item>
-          <el-menu-item index="/ai-assistant">
-            <el-icon><Opportunity /></el-icon><span>异常建议助手</span>
-          </el-menu-item>
-          <el-menu-item index="/ai-daily">
-            <el-icon><Document /></el-icon><span>生产日报助手</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-menu-item index="/traces">
-          <el-icon><Search /></el-icon><span>追溯查询</span>
-        </el-menu-item>
-        <el-sub-menu index="integration">
-          <template #title>
-            <el-icon><Link /></el-icon><span>系统集成</span>
-          </template>
-          <el-menu-item index="/erp-orders">
-            <el-icon><ShoppingCart /></el-icon><span>ERP 订单</span>
-          </el-menu-item>
-          <el-menu-item index="/inventory">
-            <el-icon><OfficeBuilding /></el-icon><span>WMS 库存</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-menu-item index="/dashboard">
-          <el-icon><DataAnalysis /></el-icon><span>生产看板</span>
-        </el-menu-item>
-        <el-menu-item index="/tv-demo">
-          <el-icon><VideoPlay /></el-icon><span>电视 Demo</span>
-        </el-menu-item>
+        <!-- 第 5 周动态路由：菜单由后端菜单树驱动，递归渲染（角色差异 = 菜单差异） -->
+        <SidebarItem v-for="node in menu.menus" :key="node.id" :node="node" />
       </el-menu>
     </el-aside>
 
     <el-container>
       <!-- 顶栏 -->
       <el-header class="header">
-        <div class="page-title">{{ route.meta.title }}</div>
+        <!-- 动态路由 meta.title 来自后端菜单名，异常路由兜底展示系统名 -->
+        <div class="page-title">{{ route.meta.title || 'SmartFactory MES' }}</div>
         <div class="header-right">
           <el-icon><User /></el-icon>
           <span class="username">{{ auth.userInfo?.realName || auth.userInfo?.username || '未登录' }}</span>
@@ -120,13 +42,17 @@
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { useMenuStore } from '@/stores/menu'
+import SidebarItem from './SidebarItem.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const menu = useMenuStore()
 
 async function handleLogout() {
   await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
+  menu.reset()
   auth.logout()
   router.push('/login')
 }

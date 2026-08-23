@@ -49,6 +49,8 @@ request.interceptors.response.use(
 function clearLogin() {
   localStorage.removeItem('mes_token')
   localStorage.removeItem('mes_user')
+  // 动态路由清理：防换账号残留旧角色路由（动态 import 规避 request→api→store 的模块环）
+  import('@/stores/menu').then(({ useMenuStore }) => useMenuStore().reset())
   router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
 }
 

@@ -801,3 +801,19 @@ export interface PickResult {
   workOrderNo: string
   items: PickItem[]
 }
+
+// ---------- 动态路由：菜单树节点（第 5 周，GET /auth/menus） ----------
+export interface MenuNode {
+  id: string
+  parentId: string
+  menuName: string
+  /** M 目录 / C 菜单（F 按钮不进树） */
+  menuType: string
+  /** 前端路由路径（仅 C 级非空，如 /erp-orders） */
+  path?: string
+  perm?: string
+  /** Element Plus 图标名（全量注册后按名字符串解析） */
+  icon?: string
+  orderNum?: number
+  children: MenuNode[]
+}

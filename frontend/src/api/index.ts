@@ -40,6 +40,7 @@ import type {
   Material,
   MaterialQuery,
   MaterialSave,
+  MenuNode,
   OperationTask,
   PageResult,
   PickResult,
@@ -78,6 +79,8 @@ export const authApi = {
   login: (username: string, password: string) =>
     httpPost<LoginResult>('/auth/login', { username, password }),
   users: () => httpGet<UserOption[]>('/auth/users'),
+  /** 当前用户菜单树（第 5 周动态路由数据源，登录即可取） */
+  menus: () => httpGet<MenuNode[]>('/auth/menus'),
 }
 
 // ---------- 生产工单 ----------
