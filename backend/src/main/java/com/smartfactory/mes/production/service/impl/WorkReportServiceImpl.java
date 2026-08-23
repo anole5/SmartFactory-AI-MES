@@ -98,6 +98,14 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
     }
 
     @Override
+    public List<WorkReportVO> listByBatchNo(String batchNo) {
+        List<MesWorkReport> reports = this.list(new LambdaQueryWrapper<MesWorkReport>()
+                .eq(MesWorkReport::getProductBatchNo, batchNo)
+                .orderByAsc(MesWorkReport::getId));
+        return toVOs(reports);
+    }
+
+    @Override
     @Transactional
     public void report(WorkReportSaveDTO dto) {
         // ① 任务必须 RUNNING

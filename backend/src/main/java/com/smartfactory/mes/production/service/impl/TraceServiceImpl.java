@@ -6,17 +6,31 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartfactory.mes.auth.CurrentUserContext;
 import com.smartfactory.mes.auth.entity.SysUser;
 import com.smartfactory.mes.auth.mapper.SysUserMapper;
+import com.smartfactory.mes.common.api.ResultCode;
 import com.smartfactory.mes.common.exception.BusinessException;
 import com.smartfactory.mes.common.sequence.OrderNoGenerator;
+import com.smartfactory.mes.production.dto.BatchTraceVO;
+import com.smartfactory.mes.production.dto.SnTraceVO;
 import com.smartfactory.mes.production.dto.TraceRecordVO;
+import com.smartfactory.mes.production.dto.WorkOrderVO;
+import com.smartfactory.mes.production.dto.WorkReportVO;
+import com.smartfactory.mes.production.entity.MesProductSn;
 import com.smartfactory.mes.production.entity.MesTraceRecord;
+import com.smartfactory.mes.production.entity.MesWorkOrder;
+import com.smartfactory.mes.production.entity.MesWorkReport;
 import com.smartfactory.mes.production.enums.ActionType;
+import com.smartfactory.mes.production.mapper.MesProductSnMapper;
 import com.smartfactory.mes.production.mapper.MesTraceRecordMapper;
+import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
+import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
 import com.smartfactory.mes.production.service.TraceService;
+import com.smartfactory.mes.production.service.WorkReportService;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,17 +44,32 @@ import java.util.stream.Collectors;
 public class TraceServiceImpl implements TraceService {
 
     private final MesTraceRecordMapper traceRecordMapper;
+    private final MesProductSnMapper productSnMapper;
+    private final MesWorkOrderMapper workOrderMapper;
+    private final MesWorkReportMapper workReportMapper;
     private final SysUserMapper sysUserMapper;
     private final OrderNoGenerator orderNoGenerator;
     private final ObjectMapper objectMapper;
+    private final WorkReportService workReportService;
 
     public TraceServiceImpl(MesTraceRecordMapper traceRecordMapper,
+                            MesProductSnMapper productSnMapper,
+                            MesWorkOrderMapper workOrderMapper,
+                            MesWorkReportMapper workReportMapper,
                             SysUserMapper sysUserMapper,
-                            OrderNoGenerator orderNoGenerator, ObjectMapper objectMapper) {
+                            OrderNoGenerator orderNoGenerator,
+                            ObjectMapper objectMapper,
+                            // 同模块双向依赖：报工写追溯（WorkReport → Trace），
+                            // 批次追溯复用报工列表（Trace → WorkReport），@Lazy 打破构造环
+                            @Lazy WorkReportService workReportService) {
         this.traceRecordMapper = traceRecordMapper;
+        this.productSnMapper = productSnMapper;
+        this.workOrderMapper = workOrderMapper;
+        this.workReportMapper = workReportMapper;
         this.sysUserMapper = sysUserMapper;
         this.orderNoGenerator = orderNoGenerator;
         this.objectMapper = objectMapper;
+        this.workReportService = workReportService;
     }
 
     @Override
@@ -78,6 +107,53 @@ public class TraceServiceImpl implements TraceService {
             }
             return vo;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public SnTraceVO snTrace(String sn) {
+        MesProductSn snRow = productSnMapper.selectOne(new LambdaQueryWrapper<MesProductSn>()
+                .eq(MesProductSn::getSn, sn));
+        if (snRow == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "SN 不存在: " + sn);
+        }
+        SnTraceVO vo = new SnTraceVO();
+        vo.setId(snRow.getId());
+        vo.setSn(snRow.getSn());
+        vo.setWorkOrderId(snRow.getWorkOrderId());
+        vo.setProductCodeSnapshot(snRow.getProductCodeSnapshot());
+        vo.setProductNameSnapshot(snRow.getProductNameSnapshot());
+        vo.setReportId(snRow.getReportId());
+        vo.setCreatedAt(snRow.getCreatedAt());
+        MesWorkOrder wo = workOrderMapper.selectById(snRow.getWorkOrderId());
+        if (wo != null) {
+            vo.setWorkOrderNo(wo.getWorkOrderNo());
+            vo.setWorkOrderStatus(wo.getStatus().getCode());
+        }
+        MesWorkReport report = snRow.getReportId() == null ? null : workReportMapper.selectById(snRow.getReportId());
+        if (report != null) {
+            vo.setReportNo(report.getReportNo());
+        }
+        vo.setTimeline(listByWorkOrder(snRow.getWorkOrderId()));
+        return vo;
+    }
+
+    @Override
+    public BatchTraceVO batchTrace(String batchNo) {
+        // 复用报工服务列表能力（构造注入 @Lazy 打破循环，见构造函数注释）
+        List<WorkReportVO> reports = workReportService.listByBatchNo(batchNo);
+        if (reports.isEmpty()) {
+            return BatchTraceVO.empty();
+        }
+        // 批次内工单去重：同工单 13 条报工只出一行工单摘要
+        Set<Long> workOrderIds = reports.stream().map(WorkReportVO::getWorkOrderId).collect(Collectors.toSet());
+        List<WorkOrderVO> workOrders = workOrderMapper.selectBatchIds(workOrderIds).stream()
+                .sorted(Comparator.comparing(MesWorkOrder::getId))
+                .map(WorkOrderVO::of)
+                .collect(Collectors.toList());
+        BatchTraceVO vo = new BatchTraceVO();
+        vo.setReports(reports);
+        vo.setWorkOrders(workOrders);
+        return vo;
     }
 
     private String toJson(Object detail) {

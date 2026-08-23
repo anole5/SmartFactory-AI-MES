@@ -1,5 +1,7 @@
 package com.smartfactory.mes.production.service;
 
+import com.smartfactory.mes.production.dto.BatchTraceVO;
+import com.smartfactory.mes.production.dto.SnTraceVO;
 import com.smartfactory.mes.production.dto.TraceRecordVO;
 import com.smartfactory.mes.production.enums.ActionType;
 
@@ -26,4 +28,18 @@ public interface TraceService {
      * @param workOrderId 工单 ID
      */
     List<TraceRecordVO> listByWorkOrder(Long workOrderId);
+
+    /**
+     * 按整机 SN 追溯：SN 出生信息 + 出生工单摘要 + 该工单全时间线（未知 SN 404）
+     *
+     * @param sn 整机序列号
+     */
+    SnTraceVO snTrace(String sn);
+
+    /**
+     * 按批次号追溯：该批次全部报工记录（含工单号/工序/操作人回填）+ 涉及的工单去重列表
+     *
+     * @param batchNo 生产批次号
+     */
+    BatchTraceVO batchTrace(String batchNo);
 }
