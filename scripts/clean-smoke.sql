@@ -3,10 +3,11 @@
 -- 执行方式（Git Bash，勿用 PowerShell）：
 --   docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < scripts/clean-smoke.sql
 -- 配合 scripts/smoke.mjs 使用。
--- 第 4 周版：种子（00→08）不含任何工单/任务/报工/追溯/质检/异常/SN/AI 记录
+-- 第 6 周版：种子（00→12）不含任何工单/任务/报工/追溯/质检/异常/SN/AI 记录
 -- 数据，事务类数据整表清空即可；基础资料、种子用户/角色/菜单、种子设备
--- （id 1-10）、种子知识库文档（id 1-4）保留。验证脚本残留（V6-BATCH-1、
--- EQ-T7-TEST、无 external_order_no 的临时工单、【验证】知识库文档）全部覆盖。
+-- （id 1-10）、种子知识库文档（id 1-4）、种子物料批次（id 1-12）保留。
+-- 验证脚本残留（V6-BATCH-1、EQ-T7-TEST、无 external_order_no 的临时工单、
+-- 【验证】知识库文档）全部覆盖。
 -- ============================================================
 
 USE smartfactory_mes;
@@ -51,8 +52,8 @@ DELETE b FROM mes_bom b
 DELETE FROM mes_product WHERE product_code IN ('SMK-001', 'T-001');
 
 -- 5. 单号序列复位：BOM/RT 预留 1（与种子单号对齐），事务类前缀全部删除，
---    第 3 周 5 种前缀重置为当日起点 1（与 06-seed 对齐）
-DELETE FROM mes_sequence WHERE seq_type IN ('WO', 'TASK', 'RPT', 'TRC', 'INP', 'INS', 'DEF', 'EXP', 'SN', 'ERP', 'STK');
+--    第 3 周 5 种前缀重置为当日起点 1（与 06-seed 对齐）；MB 复位 12（种子已占 001-012）
+DELETE FROM mes_sequence WHERE seq_type IN ('WO', 'TASK', 'RPT', 'TRC', 'INP', 'INS', 'DEF', 'EXP', 'SN', 'ERP', 'STK', 'MB');
 UPDATE mes_sequence SET current_value = 1 WHERE seq_type IN ('BOM', 'RT');
 INSERT INTO mes_sequence (seq_type, seq_date, current_value) VALUES
   ('INP', '20260823', 1),
@@ -61,7 +62,8 @@ INSERT INTO mes_sequence (seq_type, seq_date, current_value) VALUES
   ('EXP', '20260823', 1),
   ('SN',  '20260823', 1),
   ('ERP', '20260823', 1),
-  ('STK', '20260823', 1);
+  ('STK', '20260823', 1),
+  ('MB',  '20260823', 12);
 
 -- 6. AI（第 4 周 3 张表：问答记录/日报为验证产生，整表清空；
 --    知识库文档保留种子 4 篇，仅清验证创建的【验证】文档）
@@ -79,3 +81,9 @@ UPDATE mes_inventory SET qty = CASE item_ref_id
   WHEN 4 THEN 100 WHEN 5 THEN 100 WHEN 20 THEN 500 END
   WHERE item_type = 'MATERIAL' AND item_ref_id IN (1, 2, 3, 4, 5, 20);
 DELETE FROM mes_inventory WHERE NOT (item_type = 'MATERIAL' AND item_ref_id IN (1, 2, 3, 4, 5, 20));
+
+-- 8. 物料批次（第 6 周）：绑定记录为验证产生整表清空；批次主数据保留种子
+--    12 行（id 1-12）并复位 used_qty（验证绑定会累加），清验证新增行
+DELETE FROM mes_report_material_batch;
+DELETE FROM mes_material_batch WHERE id > 12;
+UPDATE mes_material_batch SET used_qty = 0 WHERE id <= 12;
