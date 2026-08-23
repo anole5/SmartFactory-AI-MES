@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartfactory.mes.ai.client.DeepSeekClient;
+import com.smartfactory.mes.ai.client.EmbeddingClient;
+import com.smartfactory.mes.ai.client.QdrantClient;
 import com.smartfactory.mes.ai.dto.AiAskVO;
 import com.smartfactory.mes.ai.dto.AiReferenceVO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocQueryDTO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocSaveDTO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocVO;
+import com.smartfactory.mes.ai.dto.ReindexVO;
 import com.smartfactory.mes.ai.entity.MesAiQaRecord;
 import com.smartfactory.mes.ai.entity.MesKnowledgeDoc;
 import com.smartfactory.mes.ai.enums.AiIntent;
@@ -18,8 +21,12 @@ import com.smartfactory.mes.ai.mapper.AiQaRecordMapper;
 import com.smartfactory.mes.ai.mapper.KnowledgeDocMapper;
 import com.smartfactory.mes.ai.service.KnowledgeService;
 import com.smartfactory.mes.ai.sse.StreamSink;
+import com.smartfactory.mes.ai.support.KnowledgeChunker;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -27,20 +34,28 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 /**
  * 知识库 Service 实现
  *
- * <p>问答 RAG 管线（参考尚硅谷掌柜问数"先召回再生成"思想，召回通道简化为关键词匹配）：
- * ① 关键词打分召回文档（top 3）→ ② 按 ## 段落切分命中段落（top 3）
- * → ③ 拼上下文调 flash 档 LLM 生成 → ④ 回答带引用落问答记录。
- * LLM 故障降级：命中段落原文直出（fallback=true），演示永不白屏。</p>
+ * <p>问答 RAG 管线（参考尚硅谷掌柜问数"先召回再生成"思想）：
+ * ① 双路召回——关键词通道（文档打分 → 规范切块 → 块打分）+ 向量通道（TEI embedding → Qdrant 检索），
+ * RRF(k) 融合取 top3 合并段落（语义近义词问法也能命中，如"烧录失败"召回"烧录不良"文档）；
+ * ② 拼上下文调 flash 档 LLM 生成 → ③ 回答带引用（引用从合并段落派生）落问答记录。
+ * LLM 故障降级：命中段落原文直出（fallback=true），演示永不白屏。
+ * 向量通道故障（qdrant/TEI 宕机）自动退化纯关键词通道。</p>
  */
 @Service
 public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKnowledgeDoc>
         implements KnowledgeService {
+
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeServiceImpl.class);
 
     private static final String SYSTEM_PROMPT = "你是智能电视工厂的工艺知识助手。"
             + "只依据提供的知识库文档内容回答，文档没有的内容不要编造，"
@@ -48,10 +63,30 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
 
     private final AiQaRecordMapper qaRecordMapper;
     private final DeepSeekClient deepSeekClient;
+    private final EmbeddingClient embeddingClient;
+    private final QdrantClient qdrantClient;
+    private final int topSections;
+    private final int vectorLimit;
+    private final double vectorThreshold;
+    private final int rrfK;
+    private final int maxChunkChars;
 
-    public KnowledgeServiceImpl(AiQaRecordMapper qaRecordMapper, DeepSeekClient deepSeekClient) {
+    public KnowledgeServiceImpl(AiQaRecordMapper qaRecordMapper, DeepSeekClient deepSeekClient,
+                                EmbeddingClient embeddingClient, QdrantClient qdrantClient,
+                                @Value("${ai.knowledge.recall.top-sections:3}") int topSections,
+                                @Value("${ai.knowledge.recall.vector-limit:8}") int vectorLimit,
+                                @Value("${ai.knowledge.recall.vector-threshold:0.30}") double vectorThreshold,
+                                @Value("${ai.knowledge.recall.rrf-k:60}") int rrfK,
+                                @Value("${ai.embedding.max-chunk-chars:400}") int maxChunkChars) {
         this.qaRecordMapper = qaRecordMapper;
         this.deepSeekClient = deepSeekClient;
+        this.embeddingClient = embeddingClient;
+        this.qdrantClient = qdrantClient;
+        this.topSections = topSections;
+        this.vectorLimit = vectorLimit;
+        this.vectorThreshold = vectorThreshold;
+        this.rrfK = rrfK;
+        this.maxChunkChars = maxChunkChars;
     }
 
     @Override
@@ -83,6 +118,8 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         entity.setStatus(dto.getStatus() != null ? dto.getStatus() : KnowledgeDocStatus.ENABLED);
         entity.setRemark(dto.getRemark());
         this.save(entity);
+        // 写路径同步向量索引：ENABLED 入库向量，DISABLED 无点（失败只告警不阻断 CRUD）
+        syncDocVector(entity);
         return entity.getId();
     }
 
@@ -97,16 +134,17 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         entity.setStatus(dto.getStatus() != null ? dto.getStatus() : entity.getStatus());
         entity.setRemark(dto.getRemark());
         this.updateById(entity);
+        syncDocVector(entity);
     }
 
     @Override
     @Transactional
     public AiAskVO ask(String question) {
-        // ① 关键词打分召回：仅 ENABLED 文档参与检索（停用 = 业务下线，不参与召回）
-        List<DocHit> docHits = recallDocs(question);
+        // ① 双路召回（关键词 + 向量）RRF 合并取 top3 段落
+        List<SectionHit> sections = recall(question);
 
-        // ② 无命中：模板兜底话术 + 候选文档列表
-        if (docHits.isEmpty()) {
+        // ② 两通道均空：模板兜底话术 + 候选文档列表
+        if (sections.isEmpty()) {
             String answer = fallbackNoHit(enabledDocs());
             Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, "");
             AiAskVO vo = new AiAskVO();
@@ -117,10 +155,7 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
             return vo;
         }
 
-        // ③ 段落召回：命中文档按 ## 切段，段落按关键词命中数打分取 top 3
-        List<SectionHit> sections = collectSections(docHits, question);
-
-        // ④ 拼上下文调 flash 档生成；LLM 故障降级为命中段落原文
+        // ③ 拼上下文调 flash 档生成；LLM 故障降级为命中段落原文
         String answer;
         boolean fallback;
         try {
@@ -131,12 +166,10 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
             fallback = true;
         }
 
-        Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, refDocIds(docHits));
+        Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, refDocIds(sections));
         AiAskVO vo = new AiAskVO();
         vo.setAnswer(answer);
-        vo.setReferences(docHits.stream()
-                .map(hit -> new AiReferenceVO(hit.doc.getId(), hit.doc.getDocName()))
-                .collect(Collectors.toList()));
+        vo.setReferences(buildReferences(sections));
         vo.setFallback(fallback);
         vo.setRecordId(recordId);
         return vo;
@@ -147,8 +180,8 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         // 管线与 ask() 一致，仅生成调用换成流式：delta 逐块推给前端（打字机）。
         // 不加 @Transactional：问答记录是流结束后单条 INSERT（自动提交），
         // 无需为一次插入把数据库连接占满整个 LLM 流式周期。
-        List<DocHit> docHits = recallDocs(question);
-        if (docHits.isEmpty()) {
+        List<SectionHit> sections = recall(question);
+        if (sections.isEmpty()) {
             String answer = fallbackNoHit(enabledDocs());
             sink.sendDelta(answer);
             if (sink.isCancelled()) {
@@ -163,7 +196,6 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
             return vo;
         }
 
-        List<SectionHit> sections = collectSections(docHits, question);
         StringBuilder answer = new StringBuilder();
         boolean fallback;
         try {
@@ -186,12 +218,10 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
             return null;
         }
 
-        Long recordId = saveRecord(question, answer.toString(), AiIntent.KNOWLEDGE, refDocIds(docHits));
+        Long recordId = saveRecord(question, answer.toString(), AiIntent.KNOWLEDGE, refDocIds(sections));
         AiAskVO vo = new AiAskVO();
         vo.setAnswer(answer.toString());
-        vo.setReferences(docHits.stream()
-                .map(hit -> new AiReferenceVO(hit.doc.getId(), hit.doc.getDocName()))
-                .collect(Collectors.toList()));
+        vo.setReferences(buildReferences(sections));
         vo.setFallback(fallback);
         vo.setRecordId(recordId);
         return vo;
@@ -208,16 +238,102 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         qaRecordMapper.updateById(record);
     }
 
+    @Override
+    public ReindexVO reindex() {
+        // 全量重建：删集合重建（兼作孤儿点自愈）→ 全部 ENABLED 文档重新切块入库。
+        // 此方法不允许降级：qdrant/TEI 故障直接抛 AiServiceException（reindex 是真实金丝雀）。
+        qdrantClient.deleteCollection();
+        qdrantClient.ensureCollection();
+        List<MesKnowledgeDoc> enabled = enabledDocs();
+        int sectionCount = 0;
+        for (MesKnowledgeDoc doc : enabled) {
+            List<QdrantClient.Point> points = buildPoints(doc);
+            sectionCount += points.size();
+            qdrantClient.upsert(points);
+        }
+        return new ReindexVO(enabled.size(), sectionCount);
+    }
+
     // ------------------------------------------------------------
-    // 私有工具
+    // 双路召回
     // ------------------------------------------------------------
 
-    private MesKnowledgeDoc mustExist(Long id) {
-        MesKnowledgeDoc entity = this.getById(id);
-        if (entity == null) {
-            throw new BusinessException("文档不存在: id=" + id);
+    /** 双路召回 + RRF 合并：两通道均空返回空列表（走无命中兜底），单通道空则另一通道直出 */
+    private List<SectionHit> recall(String question) {
+        List<SectionHit> keyword = keywordRecall(question);
+        List<SectionHit> vector = vectorRecall(question);
+        if (keyword.isEmpty()) {
+            return vector.stream().limit(topSections).collect(Collectors.toList());
         }
-        return entity;
+        if (vector.isEmpty()) {
+            return keyword.stream().limit(topSections).collect(Collectors.toList());
+        }
+        return rrfMerge(keyword, vector).stream().limit(topSections).collect(Collectors.toList());
+    }
+
+    /** 关键词通道：文档打分（top3）→ 规范切块 → 块内关键词命中打分（与索引同一切法，id 对齐） */
+    private List<SectionHit> keywordRecall(String question) {
+        List<SectionHit> hits = new ArrayList<>();
+        for (DocHit dh : recallDocs(question)) {
+            for (KnowledgeChunker.Chunk c : KnowledgeChunker.chunk(
+                    dh.doc.getId(), dh.doc.getDocName(), String.valueOf(dh.doc.getDocType()),
+                    dh.doc.getKeywords(), dh.doc.getContent(), maxChunkChars)) {
+                int score = scoreChunk(dh.doc.getKeywords(), c.text);
+                if (score > 0) {
+                    hits.add(new SectionHit(dh.doc.getId(), dh.doc.getDocName(), c.idx, c.text, score, 0));
+                }
+            }
+        }
+        return hits;
+    }
+
+    /** 向量通道：embed(question) → Qdrant 检索；服务不可用自动退化（返回空，上游走关键词） */
+    private List<SectionHit> vectorRecall(String question) {
+        try {
+            float[] query = embeddingClient.embed(question);
+            List<QdrantClient.ScoredPoint> points = qdrantClient.search(query, vectorLimit, vectorThreshold);
+            List<SectionHit> hits = new ArrayList<>();
+            for (QdrantClient.ScoredPoint p : points) {
+                Map<String, Object> payload = p.payload;
+                if (payload == null) {
+                    continue;
+                }
+                long docId = ((Number) payload.getOrDefault("doc_id", 0)).longValue();
+                int idx = ((Number) payload.getOrDefault("section_idx", 0)).intValue();
+                String docName = String.valueOf(payload.getOrDefault("doc_name", ""));
+                String text = String.valueOf(payload.getOrDefault("section_text", ""));
+                if (docId <= 0 || text.isEmpty()) {
+                    continue;
+                }
+                hits.add(new SectionHit(docId, docName, idx, text, 0, p.score));
+            }
+            return hits;
+        } catch (AiServiceException e) {
+            log.warn("向量召回通道不可用，退化纯关键词: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /** RRF 融合：通道内按分数排名，得分 Σ 1/(k+rank)，同键（docId#idx）两通道分数相加 */
+    private List<SectionHit> rrfMerge(List<SectionHit> keyword, List<SectionHit> vector) {
+        Map<String, SectionHit> byKey = new LinkedHashMap<>();
+        Map<String, Double> fused = new LinkedHashMap<>();
+        accumulate(byKey, fused, keyword, Comparator.comparingInt((SectionHit h) -> h.keywordScore).reversed());
+        accumulate(byKey, fused, vector, Comparator.comparingDouble((SectionHit h) -> h.vectorScore).reversed());
+        List<SectionHit> merged = new ArrayList<>(byKey.values());
+        merged.sort((a, b) -> Double.compare(fused.get(b.key()), fused.get(a.key())));
+        return merged;
+    }
+
+    private void accumulate(Map<String, SectionHit> byKey, Map<String, Double> fused,
+                            List<SectionHit> channel, Comparator<SectionHit> rankCmp) {
+        List<SectionHit> ranked = new ArrayList<>(channel);
+        ranked.sort(rankCmp);
+        for (int i = 0; i < ranked.size(); i++) {
+            SectionHit hit = ranked.get(i);
+            byKey.putIfAbsent(hit.key(), hit);
+            fused.merge(hit.key(), 1.0 / (rrfK + i + 1), Double::sum);
+        }
     }
 
     /** 参与召回的全部启用文档 */
@@ -252,33 +368,66 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         return score;
     }
 
-    /** 命中文档按 ## 段落切分并按关键词命中数打分 */
-    private List<SectionHit> collectSections(List<DocHit> docHits, String question) {
-        List<SectionHit> result = new ArrayList<>();
-        for (DocHit hit : docHits) {
-            for (String section : hit.doc.getContent().split("(?=## )")) {
-                int score = 0;
-                if (StringUtils.hasText(hit.doc.getKeywords())) {
-                    for (String kw : hit.doc.getKeywords().split("[,，]")) {
-                        if (StringUtils.hasText(kw) && section.contains(kw.trim())) {
-                            score++;
-                        }
-                    }
-                }
-                if (score > 0) {
-                    result.add(new SectionHit(hit.doc.getDocName(), section.trim(), score));
+    /** 块内关键词命中打分 */
+    private int scoreChunk(String keywords, String text) {
+        int score = 0;
+        if (StringUtils.hasText(keywords)) {
+            for (String kw : keywords.split("[,，]")) {
+                if (StringUtils.hasText(kw) && text.contains(kw.trim())) {
+                    score++;
                 }
             }
         }
-        result.sort(Comparator.comparingInt(SectionHit::getScore).reversed());
-        return result.stream().limit(3).collect(Collectors.toList());
+        return score;
+    }
+
+    // ------------------------------------------------------------
+    // 向量索引写路径
+    // ------------------------------------------------------------
+
+    /** 文档向量同步：停用删点；启用先删后写（内容更新即重建）。失败只告警不阻断文档 CRUD（reindex 可修复） */
+    private void syncDocVector(MesKnowledgeDoc doc) {
+        try {
+            qdrantClient.ensureCollection();
+            qdrantClient.deleteByDocId(doc.getId());
+            if (doc.getStatus() == KnowledgeDocStatus.ENABLED) {
+                qdrantClient.upsert(buildPoints(doc));
+            }
+        } catch (AiServiceException e) {
+            log.warn("文档向量同步失败（文档 CRUD 不受影响，可用 reindex 修复）: docId={}, err={}",
+                    doc.getId(), e.getMessage());
+        }
+    }
+
+    /** 文档切块 + 逐块 embedding → 向量点（reindex 与写路径共用） */
+    private List<QdrantClient.Point> buildPoints(MesKnowledgeDoc doc) {
+        List<QdrantClient.Point> points = new ArrayList<>();
+        for (KnowledgeChunker.Chunk c : KnowledgeChunker.chunk(
+                doc.getId(), doc.getDocName(), String.valueOf(doc.getDocType()),
+                doc.getKeywords(), doc.getContent(), maxChunkChars)) {
+            points.add(new QdrantClient.Point(KnowledgeChunker.pointId(doc.getId(), c.idx),
+                    embeddingClient.embed(c.text), c.payload));
+        }
+        return points;
+    }
+
+    // ------------------------------------------------------------
+    // 生成与落库
+    // ------------------------------------------------------------
+
+    private MesKnowledgeDoc mustExist(Long id) {
+        MesKnowledgeDoc entity = this.getById(id);
+        if (entity == null) {
+            throw new BusinessException("文档不存在: id=" + id);
+        }
+        return entity;
     }
 
     /** 拼 LLM 上下文：用户问题 + 命中段落（标注来源文档） */
     private String buildContext(String question, List<SectionHit> sections) {
         StringBuilder context = new StringBuilder("用户问题：").append(question).append("\n\n知识库文档片段：\n");
         for (SectionHit s : sections) {
-            context.append("【文档：").append(s.docName).append("】").append(s.section).append("\n\n");
+            context.append("【文档：").append(s.docName).append("】").append(s.text).append("\n\n");
         }
         return context.toString();
     }
@@ -287,7 +436,7 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
     private String fallbackFromSections(List<SectionHit> sections) {
         StringBuilder sb = new StringBuilder("【模板回答】以下为知识库原文片段：\n\n");
         for (SectionHit s : sections) {
-            sb.append("【文档：").append(s.docName).append("】\n").append(s.section).append("\n\n");
+            sb.append("【文档：").append(s.docName).append("】\n").append(s.text).append("\n\n");
         }
         return sb.toString();
     }
@@ -302,10 +451,23 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         return sb.toString();
     }
 
+    /** 引用：合并段落去重后的文档（向量命中的文档同样进引用） */
+    private List<AiReferenceVO> buildReferences(List<SectionHit> sections) {
+        List<AiReferenceVO> refs = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        for (SectionHit s : sections) {
+            if (seen.add(s.docId)) {
+                refs.add(new AiReferenceVO(s.docId, s.docName));
+            }
+        }
+        return refs;
+    }
+
     /** 命中文档 id 逗号拼接（问答记录留痕召回来源） */
-    private String refDocIds(List<DocHit> docHits) {
-        return docHits.stream()
-                .map(hit -> String.valueOf(hit.doc.getId()))
+    private String refDocIds(List<SectionHit> sections) {
+        return sections.stream()
+                .map(s -> String.valueOf(s.docId))
+                .distinct()
                 .collect(Collectors.joining(","));
     }
 
@@ -334,20 +496,26 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         }
     }
 
-    /** 段落召回中间结果 */
+    /** 段落召回中间结果（两通道共用；key = docId#idx 与索引点 id 对齐） */
     private static class SectionHit {
+        final long docId;
         final String docName;
-        final String section;
-        final int score;
+        final int idx;
+        final String text;
+        final int keywordScore;
+        final double vectorScore;
 
-        SectionHit(String docName, String section, int score) {
+        SectionHit(long docId, String docName, int idx, String text, int keywordScore, double vectorScore) {
+            this.docId = docId;
             this.docName = docName;
-            this.section = section;
-            this.score = score;
+            this.idx = idx;
+            this.text = text;
+            this.keywordScore = keywordScore;
+            this.vectorScore = vectorScore;
         }
 
-        int getScore() {
-            return score;
+        String key() {
+            return docId + "#" + idx;
         }
     }
 }

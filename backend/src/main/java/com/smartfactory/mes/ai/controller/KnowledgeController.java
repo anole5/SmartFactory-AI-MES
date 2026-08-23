@@ -7,6 +7,7 @@ import com.smartfactory.mes.ai.dto.KnowledgeDocQueryDTO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocSaveDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartfactory.mes.ai.dto.KnowledgeDocVO;
+import com.smartfactory.mes.ai.dto.ReindexVO;
 import com.smartfactory.mes.ai.enums.AiIntent;
 import com.smartfactory.mes.ai.service.KnowledgeService;
 import com.smartfactory.mes.ai.sse.SseSupport;
@@ -101,6 +102,13 @@ public class KnowledgeController {
                         "fallback", Boolean.TRUE.equals(vo.getFallback())));
             }
         });
+    }
+
+    /** 向量索引全量重建（幂等，兼作孤儿点自愈；admin 权限位复用 ai:knowledge:create） */
+    @RequirePermission("ai:knowledge:create")
+    @PostMapping("/reindex")
+    public ApiResult<ReindexVO> reindex() {
+        return ApiResult.success(knowledgeService.reindex());
     }
 
     /** 问答反馈（有用/无用，覆盖回填） */

@@ -124,10 +124,19 @@ public class QdrantClient {
         }
     }
 
-    /** 删除整个集合（reindex 全量重建入口；随后调用 ensureCollection 重建） */
+    /** 删除整个集合（reindex 全量重建入口；随后调用 ensureCollection 重建）；集合不存在视为成功（幂等） */
     public void deleteCollection() {
         try {
-            restClient.delete().uri("/collections/{name}", collection).retrieve().toBodilessEntity();
+            int status = restClient.delete().uri("/collections/{name}", collection)
+                    .exchange((request, response) -> response.getStatusCode().value());
+            if (status == 404) {
+                return;
+            }
+            if (status >= 400) {
+                throw new AiServiceException("Qdrant 删除集合失败: HTTP " + status);
+            }
+        } catch (AiServiceException e) {
+            throw e;
         } catch (Exception e) {
             throw new AiServiceException("Qdrant 删除集合失败: " + e.getMessage(), e);
         }

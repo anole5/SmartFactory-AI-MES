@@ -4,6 +4,7 @@ import com.smartfactory.mes.ai.dto.AiAskVO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocQueryDTO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocSaveDTO;
 import com.smartfactory.mes.ai.dto.KnowledgeDocVO;
+import com.smartfactory.mes.ai.dto.ReindexVO;
 import com.smartfactory.mes.ai.sse.StreamSink;
 import com.smartfactory.mes.common.api.PageResult;
 
@@ -32,4 +33,7 @@ public interface KnowledgeService {
 
     /** 问答反馈（1 有用 / 0 无用，覆盖回填） */
     void feedback(Long recordId, boolean useful);
+
+    /** 向量索引全量重建（幂等）：删集合重建 + 全部 ENABLED 文档重新切块入库；qdrant/TEI 故障直接抛异常不降级 */
+    ReindexVO reindex();
 }
