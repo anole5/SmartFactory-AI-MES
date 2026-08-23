@@ -24,7 +24,9 @@ public enum ActionType {
     EXCEPTION_CREATE("EXCEPTION_CREATE", "异常单创建"),
     EXCEPTION_PROCESS("EXCEPTION_PROCESS", "异常处理"),
     EXCEPTION_CLOSE("EXCEPTION_CLOSE", "异常关闭"),
-    AI_SUGGEST("AI_SUGGEST", "AI 处理建议回写");
+    AI_SUGGEST("AI_SUGGEST", "AI 处理建议回写"),
+    ERP_DONE("ERP_DONE", "工单完工回传 ERP"),
+    WMS_FINISHED_IN("WMS_FINISHED_IN", "成品完工入库");
 
     @EnumValue
     @JsonValue

@@ -52,17 +52,30 @@ DELETE FROM mes_product WHERE product_code IN ('SMK-001', 'T-001');
 
 -- 5. 单号序列复位：BOM/RT 预留 1（与种子单号对齐），事务类前缀全部删除，
 --    第 3 周 5 种前缀重置为当日起点 1（与 06-seed 对齐）
-DELETE FROM mes_sequence WHERE seq_type IN ('WO', 'TASK', 'RPT', 'TRC', 'INP', 'INS', 'DEF', 'EXP', 'SN');
+DELETE FROM mes_sequence WHERE seq_type IN ('WO', 'TASK', 'RPT', 'TRC', 'INP', 'INS', 'DEF', 'EXP', 'SN', 'ERP', 'STK');
 UPDATE mes_sequence SET current_value = 1 WHERE seq_type IN ('BOM', 'RT');
 INSERT INTO mes_sequence (seq_type, seq_date, current_value) VALUES
   ('INP', '20260823', 1),
   ('INS', '20260823', 1),
   ('DEF', '20260823', 1),
   ('EXP', '20260823', 1),
-  ('SN',  '20260823', 1);
+  ('SN',  '20260823', 1),
+  ('ERP', '20260823', 1),
+  ('STK', '20260823', 1);
 
 -- 6. AI（第 4 周 3 张表：问答记录/日报为验证产生，整表清空；
 --    知识库文档保留种子 4 篇，仅清验证创建的【验证】文档）
 DELETE FROM mes_ai_qa_record;
 DELETE FROM mes_ai_report;
 DELETE FROM mes_knowledge_doc WHERE id > 4;
+
+-- 7. 系统集成（第 5 周）：外部订单为验证产生整表清空；
+--    库存复位种子 6 行初始数量（验证领料/入库会改数量），清验证新增行；
+--    流水保留种子 6 条初始入库，清验证新增
+DELETE FROM mes_external_order;
+DELETE FROM mes_stock_transaction WHERE id > 6;
+UPDATE mes_inventory SET qty = CASE item_ref_id
+  WHEN 1 THEN 100 WHEN 2 THEN 100 WHEN 3 THEN 100
+  WHEN 4 THEN 100 WHEN 5 THEN 100 WHEN 20 THEN 500 END
+  WHERE item_type = 'MATERIAL' AND item_ref_id IN (1, 2, 3, 4, 5, 20);
+DELETE FROM mes_inventory WHERE NOT (item_type = 'MATERIAL' AND item_ref_id IN (1, 2, 3, 4, 5, 20));
