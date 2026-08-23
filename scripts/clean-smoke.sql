@@ -3,10 +3,10 @@
 -- 执行方式（Git Bash，勿用 PowerShell）：
 --   docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < scripts/clean-smoke.sql
 -- 配合 scripts/smoke.mjs 使用。
--- 第 3 周起简化策略：种子（00→06）不含任何工单/任务/报工/追溯/质检/异常/SN
+-- 第 4 周版：种子（00→08）不含任何工单/任务/报工/追溯/质检/异常/SN/AI 记录
 -- 数据，事务类数据整表清空即可；基础资料、种子用户/角色/菜单、种子设备
--- （id 1-10）保留。验证脚本残留（V6-BATCH-1、EQ-T7-TEST、无 external_order_no
--- 的临时工单）全部覆盖。
+-- （id 1-10）、种子知识库文档（id 1-4）保留。验证脚本残留（V6-BATCH-1、
+-- EQ-T7-TEST、无 external_order_no 的临时工单、【验证】知识库文档）全部覆盖。
 -- ============================================================
 
 USE smartfactory_mes;
@@ -60,3 +60,9 @@ INSERT INTO mes_sequence (seq_type, seq_date, current_value) VALUES
   ('DEF', '20260823', 1),
   ('EXP', '20260823', 1),
   ('SN',  '20260823', 1);
+
+-- 6. AI（第 4 周 3 张表：问答记录/日报为验证产生，整表清空；
+--    知识库文档保留种子 4 篇，仅清验证创建的【验证】文档）
+DELETE FROM mes_ai_qa_record;
+DELETE FROM mes_ai_report;
+DELETE FROM mes_knowledge_doc WHERE id > 4;

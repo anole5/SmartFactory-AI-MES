@@ -1,7 +1,8 @@
 // SmartFactory-MES 冒烟测试脚本（Node 18+ 内置 fetch）
-// 第 3 周版：真实登录（JWT）→ 第 1/2 周断言回归（基础资料/生产执行/BOM升版）
+// 第 4 周版：真实登录（JWT）→ 第 1/2 周断言回归（基础资料/生产执行/BOM升版）
 //   → 第 3 周质量链路（质检任务/检验录入/不良/异常）+ SN 追溯 + 批次追溯 + 生产看板
-// 前置条件：干净库重放 00→06 后运行（种子产品 3 条等断言依赖干净状态）
+//   → 第 4 周 AI（知识库 RAG/统一助手四意图/异常建议/生产日报 + 权限边界）
+// 前置条件：干净库重放 00→08 后运行（种子产品 3 条等断言依赖干净状态）
 // 运行后清理：Git Bash 执行 scripts/clean-smoke.sql 回到种子状态
 const BASE = 'http://localhost:8080/api';
 let pass = 0, fail = 0;
@@ -549,6 +550,79 @@ let taskIds = [];
   check('qa 查看板 200', qs.status === 200 && qs.json?.code === 0, `status=${qs.status}`);
   const qe = await req('POST', '/master/equipment', { equipmentCode: 'EQ-QA-X', equipmentName: '越权' }, QA_TOKEN);
   check('qa 建设备 -> 403', qe.status === 403, `status=${qe.status}`);
+}
+
+// ------------------------------------------------------------
+// 16. 第 4 周 AI：知识库 RAG + 统一助手四意图 + 异常建议 + 日报 + 权限边界
+// ------------------------------------------------------------
+{
+  // 16.1 知识库文档分页（干净库种子 4 篇）
+  const docs = await req('GET', '/ai/knowledge/docs/page?pageNum=1&pageSize=10');
+  check('知识库文档分页 total=4（种子）', docs.status === 200 && String(docs.json?.data?.total) === '4',
+    `total=${docs.json?.data?.total}`);
+
+  // 16.2 知识库问答：命中 + 引用 + 反馈
+  const ask = await req('POST', '/ai/knowledge/ask', { question: '烧录时报 BURN_FAIL 怎么处理？' });
+  const askData = ask.json?.data ?? {};
+  check('知识库问答 200 且引用含烧录指导书',
+    ask.status === 200 && (askData.references ?? []).some(r => r.docName?.includes('烧录')),
+    JSON.stringify(askData.references?.map(r => r.docName)));
+  check('知识库问答 recordId 存在（问答记录落库）', !!askData.recordId, `recordId=${askData.recordId}`);
+  const fb = await req('PUT', `/ai/knowledge/qa-records/${askData.recordId}/feedback`, { useful: true });
+  check('问答反馈 200', fb.status === 200 && fb.json?.code === 0, `status=${fb.status}`);
+
+  // 16.3 统一助手四意图路由（规则前置，全部真 LLM）
+  const c1 = await req('POST', '/ai/chat', { question: '软件烧录的SOP流程是什么' });
+  check('助手-知识库意图 KNOWLEDGE 且引用非空',
+    c1.status === 200 && c1.json?.data?.intent === 'KNOWLEDGE' && (c1.json?.data?.references ?? []).length > 0,
+    `intent=${c1.json?.data?.intent}`);
+  const c2 = await req('POST', '/ai/chat', { question: '生成今天的生产日报' });
+  check('助手-日报意图 REPORT 且含当日日期',
+    c2.status === 200 && c2.json?.data?.intent === 'REPORT' && !!c2.json?.data?.reportDate,
+    `intent=${c2.json?.data?.intent} reportDate=${c2.json?.data?.reportDate}`);
+  const c3 = await req('POST', '/ai/chat', { question: '现在工厂整体情况怎么样' });
+  check('助手-概况意图 OVERVIEW 且 summary 含工单',
+    c3.status === 200 && c3.json?.data?.intent === 'OVERVIEW' && String(c3.json?.data?.summary ?? '').includes('工单'),
+    `intent=${c3.json?.data?.intent}`);
+
+  // 16.4 异常建议：qa 建 MANUAL 异常单 → pro 生成建议 → qa 保存回写 → 查询回显
+  const ex = await req('POST', '/quality/exceptions',
+    { defectCode: 'BLACK_SCREEN', description: '冒烟验证：整机黑屏' }, QA_TOKEN);
+  const exceptionId = ex.json?.data;
+  check('qa 创建异常单 200', ex.status === 200 && !!exceptionId, `id=${exceptionId}`);
+  const sg = await req('POST', '/ai/assistant/suggest', { exceptionId }, QA_TOKEN);
+  check('异常建议生成 200 且非模板降级（pro 推理）',
+    sg.status === 200 && String(sg.json?.data?.suggestion ?? '').length > 50 && sg.json?.data?.fallback === false,
+    `len=${sg.json?.data?.suggestion?.length}`);
+  const s1 = await req('POST', '/ai/assistant/save', { exceptionId, suggestion: sg.json?.data?.suggestion }, QA_TOKEN);
+  const s2 = await req('POST', '/ai/assistant/save', { exceptionId, suggestion: '越权保存' }, OPERATOR_TOKEN);
+  check('qa 保存建议 200 / operator 保存建议 403', s1.status === 200 && s2.status === 403,
+    `qa=${s1.status} operator=${s2.status}`);
+  const gs = await req('GET', `/ai/assistant/suggestion/${exceptionId}`, null, OPERATOR_TOKEN);
+  check('已保存建议回显非空', gs.status === 200 && String(gs.json?.data?.suggestion ?? '').length > 50,
+    `len=${gs.json?.data?.suggestion?.length}`);
+
+  // 16.5 生产日报：预览（flash 润色）→ 保存 → 同日幂等
+  const today = new Date().toISOString().slice(0, 10);
+  const pv = await req('POST', '/ai/daily/preview', { reportDate: today }, OPERATOR_TOKEN);
+  check('日报预览 200 且正文非空',
+    pv.status === 200 && String(pv.json?.data?.content ?? '').length > 20 && pv.json?.data?.fallback === false,
+    `len=${pv.json?.data?.content?.length}`);
+  const ds = await req('POST', '/ai/daily/save', { reportDate: today, content: pv.json?.data?.content }, OPERATOR_TOKEN);
+  check('日报保存 200', ds.status === 200, `status=${ds.status}`);
+  const dp = await req('GET', `/ai/daily/page?pageNum=1&pageSize=10&reportDate=${today}`, null, OPERATOR_TOKEN);
+  const sameDate = (dp.json?.data?.records ?? []).filter(r => r.reportDate === today);
+  check('日报分页同日仅 1 条（幂等覆盖）', dp.status === 200 && sameDate.length === 1,
+    `sameDate=${sameDate.length}`);
+
+  // 16.6 AI 权限边界：查询全员、知识库写仅 admin
+  const od = await req('GET', '/ai/knowledge/docs/page?pageNum=1&pageSize=5', null, OPERATOR_TOKEN);
+  const oc = await req('POST', '/ai/chat', { question: '黑屏故障怎么排查' }, OPERATOR_TOKEN);
+  const ow = await req('POST', '/ai/knowledge/docs',
+    { docName: '越权', docType: 'SOP', keywords: 'X', content: 'x' }, OPERATOR_TOKEN);
+  check('operator 知识库查询 200 / 助手 200 / 文档写 403',
+    od.status === 200 && oc.status === 200 && ow.status === 403,
+    `page=${od.status} chat=${oc.status} write=${ow.status}`);
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
