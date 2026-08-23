@@ -31,6 +31,9 @@
         <el-menu-item index="/routes">
           <el-icon><Connection /></el-icon><span>工艺路线</span>
         </el-menu-item>
+        <el-menu-item index="/equipment">
+          <el-icon><Cpu /></el-icon><span>设备管理</span>
+        </el-menu-item>
         <el-menu-item index="/work-orders">
           <el-icon><Tickets /></el-icon><span>生产工单</span>
         </el-menu-item>
@@ -54,6 +57,9 @@
             <el-icon><Bell /></el-icon><span>异常管理</span>
           </el-menu-item>
         </el-sub-menu>
+        <el-menu-item index="/traces">
+          <el-icon><Search /></el-icon><span>追溯查询</span>
+        </el-menu-item>
         <el-menu-item index="/tv-demo">
           <el-icon><VideoPlay /></el-icon><span>电视 Demo</span>
         </el-menu-item>

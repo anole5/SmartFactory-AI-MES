@@ -1,11 +1,15 @@
 // 各模块 API 集中定义（按后端 Controller 分组）
 import { httpDelete, httpGet, httpPost, httpPut } from './request'
 import type {
+  BatchTrace,
   Bom,
   BomQuery,
   BomSave,
   DefectQuery,
   DefectRecord,
+  Equipment,
+  EquipmentQuery,
+  EquipmentSave,
   ExceptionOrder,
   ExceptionQuery,
   ExceptionSave,
@@ -28,6 +32,9 @@ import type {
   Route,
   RouteQuery,
   RouteSave,
+  Sn,
+  SnQuery,
+  SnTrace,
   TaskAssign,
   TaskQuery,
   TraceRecord,
@@ -81,6 +88,13 @@ export const reportApi = {
 export const traceApi = {
   listByWorkOrder: (workOrderId: string) =>
     httpGet<TraceRecord[]>('/production/traces', { workOrderId }),
+  bySn: (sn: string) => httpGet<SnTrace>('/production/traces/sn', { sn }),
+  byBatch: (batchNo: string) => httpGet<BatchTrace>('/production/traces/batch', { batchNo }),
+}
+
+// ---------- 整机 SN（第 3 周） ----------
+export const snApi = {
+  page: (params: SnQuery) => httpGet<PageResult<Sn>>('/production/sns/page', params),
 }
 
 // ---------- 产品 ----------
@@ -146,6 +160,16 @@ export const routeApi = {
   changeStatus: (id: string, status: string) =>
     httpPut<void>(`/master/routes/${id}/status`, { status }),
   remove: (id: string) => httpDelete<void>(`/master/routes/${id}`),
+}
+
+// ---------- 设备（第 3 周） ----------
+export const equipmentApi = {
+  page: (params: EquipmentQuery) => httpGet<PageResult<Equipment>>('/master/equipment/page', params),
+  detail: (id: string) => httpGet<Equipment>(`/master/equipment/${id}`),
+  create: (data: EquipmentSave) => httpPost<string>('/master/equipment', data),
+  update: (id: string, data: EquipmentSave) => httpPut<void>(`/master/equipment/${id}`, data),
+  changeStatus: (id: string, status: string) =>
+    httpPut<void>(`/master/equipment/${id}/status`, { status }),
 }
 
 // ---------- 质检任务（第 3 周） ----------

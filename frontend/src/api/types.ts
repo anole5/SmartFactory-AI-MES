@@ -496,3 +496,70 @@ export interface ExceptionQuery extends PageQuery {
   status?: string
   keyword?: string
 }
+
+// ---------- 设备（第 3 周：状态漂移模拟） ----------
+export interface Equipment {
+  id: string
+  equipmentCode: string
+  equipmentName: string
+  model?: string
+  workstationId?: string | null
+  workstationName?: string
+  status: string
+  remark?: string
+  createdAt?: string
+}
+
+export interface EquipmentSave {
+  equipmentCode: string
+  equipmentName: string
+  model?: string
+  workstationId?: string | null
+  remark?: string
+}
+
+export interface EquipmentQuery extends PageQuery {
+  keyword?: string
+  workstationId?: string
+  status?: string
+}
+
+// ---------- 整机 SN（第 3 周） ----------
+export interface Sn {
+  id: string
+  sn: string
+  workOrderId: string
+  workOrderNo?: string
+  productId: string
+  productCodeSnapshot?: string
+  productNameSnapshot?: string
+  reportId?: string | null
+  reportNo?: string
+  createdAt?: string
+}
+
+export interface SnQuery extends PageQuery {
+  workOrderId?: string
+  keyword?: string
+}
+
+/** 按 SN 追溯结果：出生信息 + 工单全时间线 */
+export interface SnTrace {
+  id: string
+  sn: string
+  workOrderId: string
+  workOrderNo?: string
+  workOrderStatus?: string
+  productCodeSnapshot?: string
+  productNameSnapshot?: string
+  reportId?: string | null
+  reportNo?: string
+  createdAt?: string
+  timeline: TraceRecord[]
+}
+
+/** 按批次号追溯结果：批次全部报工 + 涉及工单（去重） */
+export interface BatchTrace {
+  reports: WorkReport[]
+  workOrders: WorkOrder[]
+}
