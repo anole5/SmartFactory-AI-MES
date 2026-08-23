@@ -44,6 +44,8 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/04-seed-week2.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/05-schema-week3.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/06-seed-week3.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/07-schema-week4.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/08-seed-week4.sql
 ```
 
 > 注意：Windows PowerShell 管道会以 GBK 破坏 UTF-8 内容，请在 Git Bash 中执行；
@@ -57,6 +59,11 @@ cd backend
 ```
 
 数据源账号 `smartfactory / Smartfactory@123`（见 `backend/src/main/resources/application.yml`）。
+
+AI 功能（知识库问答/异常建议/日报/统一助手）需配置 DeepSeek Key：
+复制 `backend/src/main/resources/application-local.yml.example` 为 `application-local.yml` 填入 Key，
+或启动时注入环境变量 `DEEPSEEK_API_KEY`（该文件已 gitignore，真实 Key 绝不入库）。
+未配置 Key 时 AI 接口自动降级模板回答（`fallback=true`），其余功能不受影响。
 
 ### 3. 启动前端（5173）
 
@@ -75,7 +82,10 @@ npm run dev
 | planning | planning123 | 计划员 | 工单全操作 + 基础资料只读（无报工）+ 追溯/看板查询 |
 | qa | qa123 | 质检员 | 质检任务/检验录入/不良/异常全流程 + 追溯/看板查询 |
 
-### 4. 演示路径（第 3 周质量追溯闭环）
+AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助手）**四角色全员可用**（工人查 SOP 是核心场景）；
+差异只在写动作：知识库新建/编辑仅 admin，异常建议保存回写异常单仅 admin + qa。
+
+### 4. 演示路径（第 1-3 周业务闭环 → 第 4 周 AI 应用）
 
 1. **admin** 登录 → 生产工单 → 新建（选 TV-AOC-55U4K-001，自动解析其生效 BOM/工艺路线）
    → 下发 → 自动生成 13 个工序任务（详情抽屉可看追溯时间线）
@@ -89,12 +99,19 @@ npm run dev
 7. **设备管理**：10 台种子设备状态每 15s 自动漂移，可手动切换
 8. **生产看板**：6 KPI + 4 图表（工单进度/工序良率/不良分布/设备状态）10s 自动刷新
 9. 权限差异：admin 看到全部按钮，operator 只见任务操作与报工按钮，qa 只见质检/追溯/看板
+10. **AI 助手**（重头戏）：一句话问全局——"现在工厂整体情况怎么样"（pro 档综合概况）/
+    "软件烧录的SOP流程是什么"（知识库 RAG，带引用）/ 粘贴异常单号 "EXP…怎么处理？"（pro 档
+    推理排查建议）/ "生成今天的生产日报"（flash 润色）；意图标签实时展示路由结果，回答可打有用/无用反馈
+11. **工厂知识库**：文档列表 + ## 段落详情 + SOP 问答（命中带引用、无命中兜底话术）；admin 可新建/编辑文档
+12. **异常建议助手**：下拉选异常单 → 生成处理建议（pro 深度推理约 5~20s）→ 保存回写异常单
+    ai_suggestion 并留 AI_SUGGEST 追溯（保存按钮仅 admin/qa 可见）
+13. **生产日报助手**：选日期 → 聚合当日产量/良率/工单/异常/设备 → LLM 润色 → 编辑保存（同日幂等覆盖）→ 历史列表
 
 ### 冒烟测试
 
 ```bash
 # 后端启动后执行（Node 18+ 内置 fetch，无需安装依赖）
-# 124 项断言：第 1/2 周回归 + 质量链路（质检/不良/异常）+ SN/批次追溯 + 生产看板 + 权限边界
+# 139 项断言：第 1/2/3 周回归 + AI 应用（知识库问答/异常建议/日报/四意图对话/权限边界）
 node scripts/smoke.mjs
 
 # 冒烟数据一键清理回种子状态（Git Bash）
@@ -147,6 +164,17 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | 看板 | GET | `/api/dashboard/work-orders` | 进行中工单进度（progressPercent） |
 | 看板 | GET | `/api/dashboard/quality` | 整体良率 + 工序良率 + 不良分布 |
 | 看板 | GET | `/api/dashboard/equipment` | 设备列表 + 状态分布 |
+| AI 助手 | POST | `/api/ai/chat` | 统一对话入口：意图路由（OVERVIEW/KNOWLEDGE/EXCEPTION/REPORT）→ 分发四类处理 |
+| 知识库 | GET | `/api/ai/knowledge/docs/page`、`/{id}` | 文档分页（keyword/docType/status）/详情 |
+| 知识库 | POST/PUT | `/api/ai/knowledge/docs` | 新建/编辑文档（仅 admin） |
+| 知识库 | POST | `/api/ai/knowledge/ask` | SOP 问答（关键词召回 + 段落切分 + LLM 生成带引用） |
+| 知识库 | PUT | `/api/ai/knowledge/qa-records/{id}/feedback` | 回答有用/无用反馈 |
+| 异常建议 | POST | `/api/ai/assistant/suggest` | 生成处理建议（pro 档推理 + FAULT_GUIDE 召回） |
+| 异常建议 | POST | `/api/ai/assistant/save` | 保存建议回写异常单 + AI_SUGGEST 追溯（admin/qa） |
+| 异常建议 | GET | `/api/ai/assistant/suggestion/{exceptionId}` | 回显已保存建议 |
+| 日报 | GET | `/api/ai/daily/page` | 日报历史分页 |
+| 日报 | POST | `/api/ai/daily/preview` | 聚合当日数据 + LLM 润色生成草稿 |
+| 日报 | POST | `/api/ai/daily/save` | 保存（同日幂等覆盖） |
 
 ## 技术决策记录
 
@@ -182,12 +210,25 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
     （无报错无日志）；`@ConditionalOnProperty(equipment.simulate.enabled)` 可一键关闭。
 18. **看板良率无数据返回 null**：good+defect=0 时良率 null 而非 0，前端显示 '-'——"没数据"与"零"
     业务语义不同。
+19. **DeepSeek 双档模型路由**：flash 快档（~0.8s）打高频轻任务（意图识别/SOP 问答/日报润色），
+    pro 推理档（~5s）打重任务（异常原因分析/生产概况综合）——模型路由 = 成本/时延/质量的工程权衡。
+20. **推理模型 token 预算分档**：v4-pro 的 reasoning 消耗 max_tokens 预算（1500 时 content 为空，
+    实测推理 3k + 回答 1.4k），故 `max-tokens-fast=1500` / `max-tokens-pro=8000`；空内容时日志
+    带 hasReasoning 提示调参。
+21. **意图识别两段式**：规则关键词前置覆盖演示高频问法（确定性、零 token、毫秒级）→ flash LLM
+    分类兜底长尾问法 → 再失败降级 KNOWLEDGE——确定性优先的工程实践。
+22. **关键词 RAG 管线**（借鉴尚硅谷掌柜问数）：关键词召回文档 → `##` 段落切分命中 → 拼上下文 →
+    LLM 生成带引用；规模上来只需替换召回通道（向量库），管线结构不变。
+23. **AI 降级兜底永不白屏**：LLM 失败/超时/空内容一律模板回答 + `fallback=true` 前端明示——
+    AI 是增强不是依赖；AI Key 只存 gitignored `application-local.yml`，仓库内环境变量占位。
 
 ## 开发进度
 
-> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md)
+> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md)
+> 另有 [10 步演示脚本](docs/demo-script.md) 与 [简历项目描述](docs/resume.md)。
 
 - [x] 第 1 周：工程骨架 + 基础资料（产品/物料/BOM/工艺路线/工序/工位）+ 电视 Demo 大屏
 - [x] 第 2 周：生产执行（工单/下发/工序任务/派工/报工）+ 真实登录权限（JWT/RBAC）
 - [x] 第 3 周：质量追溯看板（质检任务/检验录入/不良/异常 + SN/批次追溯 + 设备漂移模拟 + ECharts 大屏）
-- [ ] 第 4 周：AI 应用与项目包装
+- [x] 第 4 周：AI 应用与项目包装（DeepSeek 双档接入 + 知识库 RAG + 异常建议 + 生产日报 + 统一 AI 助手）
+- [ ] 第 5 周（可选）：ERP/WMS 模拟集成、前端动态路由、物料追溯、生产排程、AI 回答 SSE 流式
