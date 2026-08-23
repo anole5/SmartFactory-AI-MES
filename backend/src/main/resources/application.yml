@@ -9,6 +9,12 @@ jwt:
   secret: smartfactory-mes-demo-secret-key-20260823
   expire-hours: 24
 
+# 设备状态漂移模拟（演示：定时随机漂移设备状态供看板展示，enabled=false 整体关闭）
+equipment:
+  simulate:
+    enabled: true
+    interval-ms: 15000
+
 spring:
   application:
     name: smartfactory-mes
