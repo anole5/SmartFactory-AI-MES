@@ -642,6 +642,58 @@ export interface BatchSnTrace {
   sns: BatchSnItem[]
 }
 
+// ---------- 生产排程（第 6 周） ----------
+export interface GanttTask {
+  taskId: string
+  taskNo: string
+  workOrderId: string
+  workOrderNo?: string
+  processCodeSnapshot?: string
+  processNameSnapshot?: string
+  sequenceNo: number
+  workstationId?: string | null
+  workstationCode?: string
+  workstationName?: string
+  planStartTime?: string
+  planEndTime?: string
+  status: string
+  priority?: string
+  planQty: number
+  /** 逾期（计划完工已过当前时间且任务未完成/未取消） */
+  isOverdue?: boolean
+}
+
+export interface ScheduleRunResult {
+  workOrderCount: number
+  taskCount: number
+  runAt?: string
+}
+
+// ---------- 报表中心（第 6 周） ----------
+export interface ReportRow {
+  /** 分组键：日报=工序名称，周报/月报=yyyy-MM-dd */
+  groupKey: string
+  processCode?: string
+  processName?: string
+  goodQty: number
+  defectQty: number
+  reportCount: number
+  workOrderCount: number
+}
+
+export interface ReportSummary {
+  type: string
+  date?: string
+  rangeStart?: string
+  rangeEnd?: string
+  totalGoodQty: number
+  totalDefectQty: number
+  yieldRate: number
+  reportCount: number
+  workOrderCount: number
+  rows: ReportRow[]
+}
+
 // ---------- 生产看板（第 3 周） ----------
 /** 状态计数（设备分布，Long 序列化为字符串） */
 export interface StatusCount {

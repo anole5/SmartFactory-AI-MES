@@ -70,3 +70,57 @@ export function httpPut<T>(url: string, data?: object): Promise<T> {
 export function httpDelete<T>(url: string): Promise<T> {
   return request.delete(url) as unknown as Promise<T>
 }
+
+// 裸下载实例（第 6 周报表导出）：仅带 token 拦截器，不走 ApiResult 解包拦截器——
+// 导出接口直接写文件流，Blob 经过统一解包会被当 JSON 炸；responseType 固定 blob
+const downloadRequest = axios.create({
+  baseURL: '/api',
+  timeout: 30000,
+  responseType: 'blob',
+})
+
+downloadRequest.interceptors.request.use((config) => {
+  const token = localStorage.getItem('mes_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+/** 下载结果：文件 Blob + 响应头（Content-Disposition 取文件名） */
+export interface DownloadResult {
+  blob: Blob
+  headers: Record<string, string>
+}
+
+/**
+ * 文件下载（GET + blob）：成功返回 {blob, headers}；
+ * 后端 4xx 的 body 也是 blob（统一 ApiResult JSON），解析出 message 后走统一错误提示
+ */
+export async function httpDownload(url: string, params?: object): Promise<DownloadResult | null> {
+  try {
+    const res = await downloadRequest.get(url, { params })
+    return { blob: res.data as Blob, headers: res.headers as Record<string, string> }
+  } catch (error) {
+    const err = error as { response?: { status?: number; data?: Blob } }
+    if (err.response?.status === 401) {
+      clearLogin()
+      return null
+    }
+    const msgBlob = err.response?.data
+    if (msgBlob) {
+      const text = await msgBlob.text().catch(() => '')
+      try {
+        const body = JSON.parse(text) as { message?: string }
+        if (body.message) {
+          ElMessage.error(body.message)
+          return null
+        }
+      } catch {
+        /* 非 JSON 错误体，走兜底提示 */
+      }
+    }
+    ElMessage.error('下载失败')
+    return null
+  }
+}

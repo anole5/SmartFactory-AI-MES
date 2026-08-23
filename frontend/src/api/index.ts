@@ -1,5 +1,5 @@
 // 各模块 API 集中定义（按后端 Controller 分组）
-import { httpDelete, httpGet, httpPost, httpPut } from './request'
+import { httpDelete, httpDownload, httpGet, httpPost, httpPut } from './request'
 import type {
   AiAskResult,
   AiChatResult,
@@ -45,10 +45,13 @@ import type {
   MaterialBatchSave,
   MaterialQuery,
   MaterialSave,
+  GanttTask,
   MenuNode,
   OperationTask,
   PageResult,
   PickResult,
+  ReportSummary,
+  ScheduleRunResult,
   Process,
   ProcessQuery,
   ProcessSave,
@@ -160,6 +163,22 @@ export const materialBatchApi = {
   page: (params: MaterialBatchQuery) =>
     httpGet<PageResult<MaterialBatch>>('/production/material-batches/page', params),
   create: (data: MaterialBatchSave) => httpPost<string>('/production/material-batches', data),
+}
+
+// ---------- 生产排程（第 6 周） ----------
+export const scheduleApi = {
+  /** 执行排程（正向排程，重跑覆盖=幂等），返回 {workOrderCount, taskCount, runAt} */
+  run: () => httpPost<ScheduleRunResult>('/production/schedule/run'),
+  gantt: (date: string) => httpGet<GanttTask[]>('/production/schedule/gantt', { date }),
+}
+
+// ---------- 报表中心（第 6 周） ----------
+export const reportCenterApi = {
+  summary: (type: string, date?: string) =>
+    httpGet<ReportSummary>('/production/reports-center/summary', { type, date }),
+  /** Excel 导出（裸文件流，返回 Blob + 响应头，由调用方落盘） */
+  exportExcel: (type: string, date?: string) =>
+    httpDownload('/production/reports-center/export', { type, date }),
 }
 
 // ---------- 工序 ----------
