@@ -9,6 +9,7 @@ import com.smartfactory.mes.auth.enums.UserStatus;
 import com.smartfactory.mes.auth.mapper.SysUserMapper;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
+import com.smartfactory.mes.integration.wms.service.WmsService;
 import com.smartfactory.mes.master.entity.MesWorkstation;
 import com.smartfactory.mes.master.enums.WorkstationStatus;
 import com.smartfactory.mes.master.mapper.WorkstationMapper;
@@ -24,6 +25,7 @@ import com.smartfactory.mes.production.mapper.MesOperationTaskMapper;
 import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
 import com.smartfactory.mes.production.service.OperationTaskService;
 import com.smartfactory.mes.production.service.TraceService;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,15 +51,20 @@ public class OperationTaskServiceImpl extends ServiceImpl<MesOperationTaskMapper
     private final WorkstationMapper workstationMapper;
     private final SysUserMapper sysUserMapper;
     private final TraceService traceService;
+    private final WmsService wmsService;
 
     public OperationTaskServiceImpl(MesWorkOrderMapper workOrderMapper,
                                     WorkstationMapper workstationMapper,
                                     SysUserMapper sysUserMapper,
-                                    TraceService traceService) {
+                                    TraceService traceService,
+                                    // @Lazy 解环：WmsService -> WorkOrderService -> OperationTaskService 形成引用环，
+                                    // 懒代理延迟初始化，开工钩子只在真正调用时才进入 WMS 链路
+                                    @Lazy WmsService wmsService) {
         this.workOrderMapper = workOrderMapper;
         this.workstationMapper = workstationMapper;
         this.sysUserMapper = sysUserMapper;
         this.traceService = traceService;
+        this.wmsService = wmsService;
     }
 
     @Override
@@ -120,6 +127,9 @@ public class OperationTaskServiceImpl extends ServiceImpl<MesOperationTaskMapper
         if (task.getStatus() != TaskStatus.ASSIGNED) {
             throw new BusinessException("仅已派工状态的任务可以开工，当前状态: " + task.getStatus().getLabel());
         }
+        // 第 5 周系统集成开工钩子：ERP 推单工单须关键物料足额领用方可开工
+        // （手建工单无外部订单记录直接放行，老冒烟链路零影响）
+        wmsService.assertPickReady(task.getWorkOrderId());
         task.setStatus(TaskStatus.RUNNING);
         task.setStartTime(LocalDateTime.now());
         this.updateById(task);

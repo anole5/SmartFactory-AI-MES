@@ -27,4 +27,11 @@ public interface ErpOrderService {
      * <p>由报工完工钩子调用，异常由调用方兜底。</p>
      */
     void markDoneByExternalOrderNo(String externalOrderNo);
+
+    /**
+     * 判断工单是否由外部订单转来（生产钩子判定用）。
+     * <p>按 work_order_id 反查外部订单表，而不是 external_order_no 非空——
+     * 手建工单允许手填外部单号（冒烟/演示数据），不能用该字段判定来源。</p>
+     */
+    boolean isExternalWorkOrder(Long workOrderId);
 }

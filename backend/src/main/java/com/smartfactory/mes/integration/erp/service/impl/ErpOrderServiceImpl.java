@@ -20,6 +20,7 @@ import com.smartfactory.mes.production.dto.WorkOrderSaveDTO;
 import com.smartfactory.mes.production.enums.OrderPriority;
 import com.smartfactory.mes.production.service.WorkOrderService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -130,6 +131,9 @@ public class ErpOrderServiceImpl implements ErpOrderService {
     }
 
     @Override
+    // REQUIRES_NEW：完工钩子在报工事务内调用，独立事务提交——钩子失败只回滚自己，
+    // 不把报工主事务毒化成 rollback-only（「集成失败不阻断生产」的落点）
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markDoneByExternalOrderNo(String externalOrderNo) {
         if (!StringUtils.hasText(externalOrderNo)) {
             return;
@@ -138,6 +142,15 @@ public class ErpOrderServiceImpl implements ErpOrderService {
                 .eq(MesExternalOrder::getExternalOrderNo, externalOrderNo)
                 .eq(MesExternalOrder::getStatus, ExternalOrderStatus.SYNCED)
                 .set(MesExternalOrder::getStatus, ExternalOrderStatus.DONE));
+    }
+
+    @Override
+    public boolean isExternalWorkOrder(Long workOrderId) {
+        if (workOrderId == null) {
+            return false;
+        }
+        return externalOrderMapper.selectCount(new LambdaQueryWrapper<MesExternalOrder>()
+                .eq(MesExternalOrder::getWorkOrderId, workOrderId)) > 0;
     }
 
     private MesExternalOrder mustExist(Long id) {

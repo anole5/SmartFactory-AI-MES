@@ -11,6 +11,8 @@ import com.smartfactory.mes.auth.mapper.SysUserMapper;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
 import com.smartfactory.mes.common.sequence.OrderNoGenerator;
+import com.smartfactory.mes.integration.erp.service.ErpOrderService;
+import com.smartfactory.mes.integration.wms.service.WmsService;
 import com.smartfactory.mes.production.dto.WorkReportQueryDTO;
 import com.smartfactory.mes.production.dto.WorkReportSaveDTO;
 import com.smartfactory.mes.production.dto.WorkReportVO;
@@ -28,6 +30,7 @@ import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
 import com.smartfactory.mes.production.service.TraceService;
 import com.smartfactory.mes.production.service.WorkReportService;
 import com.smartfactory.mes.quality.service.InspectionTaskService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,8 +59,12 @@ import java.util.stream.Collectors;
  *   <li>最后一道工序：累计回写工单（完成数量 = 最后一道累计合格+不良），
  *       最后一道 COMPLETED → 工单 COMPLETED + 实际完工时间</li>
  *   <li>最后一道 COMPLETED 且合格&gt;0 → 批量生成整机 SN（第 3 周，同事务）</li>
+ *   <li>第 5 周系统集成完工钩子：工单 CAS 翻转成功（flipped==1）且为 ERP 推单工单时，
+ *       回传外部订单 DONE + 成品完工入库 + 写 ERP_DONE/WMS_FINISHED_IN 追溯；
+ *       钩子异常吞掉降级（不回滚报工主事务），外部订单停留 SYNCED 可人工重试</li>
  * </ol>
  */
+@Slf4j
 @Service
 public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesWorkReport>
         implements WorkReportService {
@@ -69,6 +76,8 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
     private final OrderNoGenerator orderNoGenerator;
     private final TraceService traceService;
     private final InspectionTaskService inspectionTaskService;
+    private final ErpOrderService erpOrderService;
+    private final WmsService wmsService;
 
     public WorkReportServiceImpl(MesOperationTaskMapper operationTaskMapper,
                                  MesWorkOrderMapper workOrderMapper,
@@ -76,7 +85,9 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
                                  SysUserMapper sysUserMapper,
                                  OrderNoGenerator orderNoGenerator,
                                  TraceService traceService,
-                                 InspectionTaskService inspectionTaskService) {
+                                 InspectionTaskService inspectionTaskService,
+                                 ErpOrderService erpOrderService,
+                                 WmsService wmsService) {
         this.operationTaskMapper = operationTaskMapper;
         this.workOrderMapper = workOrderMapper;
         this.productSnMapper = productSnMapper;
@@ -84,6 +95,8 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
         this.orderNoGenerator = orderNoGenerator;
         this.traceService = traceService;
         this.inspectionTaskService = inspectionTaskService;
+        this.erpOrderService = erpOrderService;
+        this.wmsService = wmsService;
     }
 
     @Override
@@ -187,8 +200,9 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
                     .set(MesWorkOrder::getCompletedQty, fresh.getCompletedQty())
                     .set(MesWorkOrder::getGoodQty, fresh.getGoodQty())
                     .set(MesWorkOrder::getDefectQty, fresh.getDefectQty()));
+            int flipped = 0;
             if (fresh.getStatus() == TaskStatus.COMPLETED) {
-                workOrderMapper.update(null, new LambdaUpdateWrapper<MesWorkOrder>()
+                flipped = workOrderMapper.update(null, new LambdaUpdateWrapper<MesWorkOrder>()
                         .eq(MesWorkOrder::getId, task.getWorkOrderId())
                         .eq(MesWorkOrder::getStatus, WorkOrderStatus.IN_PROGRESS)
                         .set(MesWorkOrder::getStatus, WorkOrderStatus.COMPLETED)
@@ -209,6 +223,28 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
                     productSn.setProductNameSnapshot(wo.getProductNameSnapshot());
                     productSn.setReportId(report.getId());
                     productSnMapper.insert(productSn);
+                }
+            }
+            // ⑨（第 5 周）系统集成完工钩子：仅本笔报工完成工单（CAS 翻转成功）才执行，
+            // 且仅 ERP 推单工单触发（手建工单不写 ERP_DONE/WMS_FINISHED_IN 追溯，冒烟计数不破）。
+            // 异常吞掉降级（不回滚报工主事务）：外部订单停留 SYNCED，成品入库失败可人工补录。
+            if (flipped == 1) {
+                try {
+                    if (erpOrderService.isExternalWorkOrder(task.getWorkOrderId())) {
+                        MesWorkOrder wo = workOrderMapper.selectById(task.getWorkOrderId());
+                        erpOrderService.markDoneByExternalOrderNo(wo.getExternalOrderNo());
+                        traceService.write(task.getWorkOrderId(), fresh.getId(), ActionType.ERP_DONE,
+                                Map.of("externalOrderNo", wo.getExternalOrderNo()));
+                        // 流水号在报工主事务内先取号传入：finishedIn 以 REQUIRES_NEW 独立事务执行，
+                        // 若在事务内再取号会与主事务竞争 mes_sequence 行锁（锁等待超时，钩子必失败）
+                        wmsService.finishedIn(task.getWorkOrderId(), fresh.getGoodQty(),
+                                orderNoGenerator.next("STK"));
+                        traceService.write(task.getWorkOrderId(), fresh.getId(), ActionType.WMS_FINISHED_IN,
+                                Map.of("goodQty", fresh.getGoodQty()));
+                    }
+                } catch (Exception e) {
+                    log.warn("系统集成完工钩子执行失败（不回滚报工）: workOrderId={}",
+                            task.getWorkOrderId(), e);
                 }
             }
         }
