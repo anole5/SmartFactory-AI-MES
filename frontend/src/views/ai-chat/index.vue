@@ -67,7 +67,11 @@
         placeholder="问产量、问 SOP、报异常单号、要日报……例如：现在工厂整体情况怎么样"
         @keydown.enter.exact.prevent="send(input)"
       />
-      <el-button type="primary" :loading="sending" :disabled="!input.trim()" @click="send(input)">
+      <!-- 流式生成中显示停止按钮：断开 SSE，AI 侧随即中止生成 -->
+      <el-button v-if="streaming" type="danger" @click="stop">
+        <el-icon><VideoPause /></el-icon>&nbsp;停止
+      </el-button>
+      <el-button v-else type="primary" :loading="sending" :disabled="!input.trim()" @click="send(input)">
         <el-icon><Promotion /></el-icon>&nbsp;发送
       </el-button>
     </div>
@@ -78,6 +82,7 @@
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { aiChatApi, knowledgeApi } from '@/api'
+import { streamPost } from '@/api/sse'
 import type { AiChatResult } from '@/api/types'
 import { AI_INTENT, labelOf } from '@/constants/dict'
 
@@ -104,7 +109,9 @@ interface ChatMsg {
 const messages = ref<ChatMsg[]>([])
 const input = ref('')
 const sending = ref(false)
+const streaming = ref(false)
 const msgAreaRef = ref<HTMLElement>()
+let abortController: AbortController | null = null
 
 onMounted(() => {
   messages.value.push({
@@ -115,30 +122,86 @@ onMounted(() => {
 
 async function send(text: string) {
   const question = text.trim()
-  if (!question || sending.value) return
+  if (!question || sending.value || streaming.value) return
   input.value = ''
   messages.value.push({ role: 'user', answer: question })
-  messages.value.push({ role: 'ai', answer: '', loading: true })
+  const aiMsg: ChatMsg = { role: 'ai', answer: '', loading: true }
+  messages.value.push(aiMsg)
   sending.value = true
+  streaming.value = true
+  abortController = new AbortController()
+  let gotEvent = false
   scrollToBottom()
+
+  // 流式链路：meta{intent 先行} → delta 逐块追加（打字机）→ done 回填引用/recordId。
+  // 首事件前失败（后端未起/网络断）自动回退非流式接口，保证不白屏。
+  await streamPost('/ai/chat/stream', { question }, {
+    onMeta: (meta) => {
+      gotEvent = true
+      aiMsg.intent = String(meta.intent ?? '')
+    },
+    onDelta: (content) => {
+      gotEvent = true
+      aiMsg.loading = false
+      aiMsg.answer += content
+      scrollToBottom()
+    },
+    onDone: (done) => {
+      gotEvent = true
+      aiMsg.loading = false
+      aiMsg.answer = done.answer
+      aiMsg.intent = done.intent ?? aiMsg.intent
+      aiMsg.references = done.references
+      aiMsg.summary = done.summary
+      aiMsg.fallback = done.fallback
+      aiMsg.recordId = done.recordId
+    },
+    onError: (message) => {
+      if (gotEvent) {
+        // 流中途失败：正文已出一部分，只提示不覆盖
+        aiMsg.loading = false
+        ElMessage.error(message)
+        return
+      }
+      fallbackToNonStream(question, aiMsg)
+    },
+  }, abortController.signal)
+
+  sending.value = false
+  streaming.value = false
+  abortController = null
+  scrollToBottom()
+}
+
+/** 首事件前失败回退非流式接口（与第 4 周一致的一次性渲染） */
+async function fallbackToNonStream(question: string, aiMsg: ChatMsg) {
   try {
     const res = await aiChatApi.chat(question)
-    const last = messages.value[messages.value.length - 1]!
-    last.loading = false
-    last.answer = res.answer
-    last.intent = res.intent
-    last.references = res.references
-    last.summary = res.summary
-    last.fallback = res.fallback
-    last.recordId = res.recordId
+    aiMsg.loading = false
+    aiMsg.answer = res.answer
+    aiMsg.intent = res.intent
+    aiMsg.references = res.references
+    aiMsg.summary = res.summary
+    aiMsg.fallback = res.fallback
+    aiMsg.recordId = res.recordId
   } catch {
-    const last = messages.value[messages.value.length - 1]!
-    last.loading = false
-    last.answer = '（网络异常，请稍后重试）'
+    aiMsg.loading = false
+    aiMsg.answer = '（网络异常，请稍后重试）'
     ElMessage.error('对话失败，请检查后端服务')
   } finally {
-    sending.value = false
     scrollToBottom()
+  }
+}
+
+/** 停止生成：断开 SSE 连接，后端 sink 取消并跳过落库 */
+function stop() {
+  abortController?.abort()
+  abortController = null
+  streaming.value = false
+  const last = messages.value[messages.value.length - 1]
+  if (last?.role === 'ai') {
+    last.loading = false
+    if (!last.answer) last.answer = '（已停止生成）'
   }
 }
 

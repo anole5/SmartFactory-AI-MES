@@ -155,6 +155,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { knowledgeApi } from '@/api'
+import { streamPost } from '@/api/sse'
 import type { AiAskResult, KnowledgeDoc, KnowledgeDocQuery, KnowledgeDocSave } from '@/api/types'
 import { KNOWLEDGE_DOC_STATUS, KNOWLEDGE_DOC_TYPE, labelOf } from '@/constants/dict'
 
@@ -197,14 +198,46 @@ async function handleAsk() {
   const q = question.value.trim()
   if (!q || asking.value) return
   asking.value = true
-  askResult.value = undefined
+  askResult.value = { answer: '', references: [], fallback: false, recordId: undefined }
   feedbackSent.value = false
+  let gotEvent = false
+
+  // 流式问答：delta 逐块追加（打字机），done 回填引用/recordId；
+  // 首事件前失败自动回退非流式接口（后端降级不白屏）
+  await streamPost('/ai/knowledge/ask/stream', { question: q }, {
+    onMeta: () => {
+      gotEvent = true
+    },
+    onDelta: (content) => {
+      gotEvent = true
+      if (askResult.value) askResult.value.answer += content
+    },
+    onDone: (done) => {
+      gotEvent = true
+      if (!askResult.value) return
+      askResult.value.answer = done.answer
+      askResult.value.references = done.references ?? []
+      askResult.value.fallback = done.fallback === true
+      askResult.value.recordId = done.recordId
+    },
+    onError: (message) => {
+      if (gotEvent) {
+        ElMessage.error(message)
+        return
+      }
+      fallbackAsk(q)
+    },
+  })
+  asking.value = false
+}
+
+/** 首事件前失败回退非流式问答 */
+async function fallbackAsk(q: string) {
   try {
     askResult.value = await knowledgeApi.ask(q)
   } catch {
+    askResult.value = undefined
     ElMessage.error('问答失败，请稍后重试')
-  } finally {
-    asking.value = false
   }
 }
 
