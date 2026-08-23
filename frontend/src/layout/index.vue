@@ -57,6 +57,23 @@
             <el-icon><Bell /></el-icon><span>异常管理</span>
           </el-menu-item>
         </el-sub-menu>
+        <el-sub-menu index="ai">
+          <template #title>
+            <el-icon><MagicStick /></el-icon><span>AI 应用</span>
+          </template>
+          <el-menu-item index="/ai-chat">
+            <el-icon><ChatDotRound /></el-icon><span>AI 助手</span>
+          </el-menu-item>
+          <el-menu-item index="/knowledge">
+            <el-icon><Collection /></el-icon><span>工厂知识库</span>
+          </el-menu-item>
+          <el-menu-item index="/ai-assistant">
+            <el-icon><Opportunity /></el-icon><span>异常建议助手</span>
+          </el-menu-item>
+          <el-menu-item index="/ai-daily">
+            <el-icon><Document /></el-icon><span>生产日报助手</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/traces">
           <el-icon><Search /></el-icon><span>追溯查询</span>
         </el-menu-item>

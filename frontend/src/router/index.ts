@@ -93,6 +93,30 @@ const router = createRouter({
           meta: { title: '异常管理' },
         },
         {
+          path: 'ai-chat',
+          name: 'ai-chat',
+          component: () => import('@/views/ai-chat/index.vue'),
+          meta: { title: 'AI 助手' },
+        },
+        {
+          path: 'knowledge',
+          name: 'knowledge',
+          component: () => import('@/views/knowledge/index.vue'),
+          meta: { title: '工厂知识库' },
+        },
+        {
+          path: 'ai-assistant',
+          name: 'ai-assistant',
+          component: () => import('@/views/ai-assistant/index.vue'),
+          meta: { title: '异常建议助手' },
+        },
+        {
+          path: 'ai-daily',
+          name: 'ai-daily',
+          component: () => import('@/views/ai-daily/index.vue'),
+          meta: { title: '生产日报助手' },
+        },
+        {
           path: 'traces',
           name: 'traces',
           component: () => import('@/views/traces/index.vue'),

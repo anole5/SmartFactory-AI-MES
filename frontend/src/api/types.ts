@@ -623,3 +623,89 @@ export interface DashboardEquipment {
   equipment: DashboardEquipmentRow[]
   statusCounts: StatusCount[]
 }
+
+// ---------- AI 知识库（第 4 周） ----------
+export interface AiReference {
+  docId: string
+  docName: string
+}
+
+/** 知识库问答出参（POST /ai/knowledge/ask） */
+export interface AiAskResult {
+  answer: string
+  references: AiReference[]
+  fallback: boolean
+  recordId?: string
+}
+
+/** 统一 AI 助手出参（POST /ai/chat） */
+export interface AiChatResult {
+  intent: string
+  answer: string
+  references?: AiReference[]
+  fallback?: boolean
+  recordId?: string
+  exceptionId?: string
+  reportDate?: string
+  summary?: string
+}
+
+export interface KnowledgeDoc {
+  id: string
+  docName: string
+  docType: string
+  keywords: string
+  content: string
+  status: string
+  remark?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface KnowledgeDocQuery extends PageQuery {
+  keyword?: string
+  docType?: string
+  status?: string
+}
+
+export interface KnowledgeDocSave {
+  docName: string
+  docType: string
+  keywords: string
+  content: string
+  status?: string
+  remark?: string
+}
+
+// ---------- AI 异常建议（第 4 周） ----------
+export interface ExceptionSuggestion {
+  exceptionId: string
+  exceptionNo: string
+  suggestion?: string
+  fallback?: boolean
+}
+
+// ---------- AI 生产日报（第 4 周） ----------
+export interface DailyPreview {
+  reportDate: string
+  content: string
+  summary?: string
+  fallback?: boolean
+}
+
+export interface DailyReport {
+  id: string
+  reportDate: string
+  content: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface DailyReportSave {
+  reportDate: string
+  content: string
+}
+
+export interface DailyReportQuery extends PageQuery {
+  reportDate?: string
+}

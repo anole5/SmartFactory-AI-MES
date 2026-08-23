@@ -142,3 +142,25 @@ export function labelOf(dict: Record<string, string>, code?: string): string {
 export function tagTypeOf(code?: string): 'success' | 'info' | 'warning' | 'danger' | 'primary' {
   return (code && STATUS_TAG_TYPE[code]) || 'info'
 }
+
+/** 知识库文档类型（第 4 周） */
+export const KNOWLEDGE_DOC_TYPE: Record<string, string> = {
+  SOP: '作业指导书',
+  QUALITY_STANDARD: '质量标准',
+  EQUIPMENT_MANUAL: '设备手册',
+  FAULT_GUIDE: '故障指南',
+}
+
+/** 知识库文档状态（第 4 周） */
+export const KNOWLEDGE_DOC_STATUS: Record<string, string> = {
+  ENABLED: '启用',
+  DISABLED: '停用',
+}
+
+/** AI 助手意图（第 4 周） */
+export const AI_INTENT: Record<string, string> = {
+  OVERVIEW: '生产概况',
+  KNOWLEDGE: '知识库',
+  EXCEPTION: '异常建议',
+  REPORT: '生产日报',
+}

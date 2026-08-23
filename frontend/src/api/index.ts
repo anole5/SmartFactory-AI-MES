@@ -1,10 +1,16 @@
 // 各模块 API 集中定义（按后端 Controller 分组）
 import { httpDelete, httpGet, httpPost, httpPut } from './request'
 import type {
+  AiAskResult,
+  AiChatResult,
   BatchTrace,
   Bom,
   BomQuery,
   BomSave,
+  DailyPreview,
+  DailyReport,
+  DailyReportQuery,
+  DailyReportSave,
   DashboardEquipment,
   DashboardQuality,
   DashboardSummary,
@@ -17,10 +23,14 @@ import type {
   ExceptionOrder,
   ExceptionQuery,
   ExceptionSave,
+  ExceptionSuggestion,
   InspectionRecord,
   InspectionRecordSave,
   InspectionTask,
   InspectionTaskQuery,
+  KnowledgeDoc,
+  KnowledgeDocQuery,
+  KnowledgeDocSave,
   LoginResult,
   Material,
   MaterialQuery,
@@ -210,4 +220,37 @@ export const exceptionApi = {
   process: (id: string) => httpPut<void>(`/quality/exceptions/${id}/process`),
   close: (id: string, resolveRemark: string) =>
     httpPut<void>(`/quality/exceptions/${id}/close`, { resolveRemark }),
+}
+
+// ---------- AI 统一助手（第 4 周） ----------
+export const aiChatApi = {
+  chat: (question: string) => httpPost<AiChatResult>('/ai/chat', { question }),
+}
+
+// ---------- 工厂知识库（第 4 周） ----------
+export const knowledgeApi = {
+  docsPage: (params: KnowledgeDocQuery) =>
+    httpGet<PageResult<KnowledgeDoc>>('/ai/knowledge/docs/page', params),
+  docsDetail: (id: string) => httpGet<KnowledgeDoc>(`/ai/knowledge/docs/${id}`),
+  docsCreate: (data: KnowledgeDocSave) => httpPost<string>('/ai/knowledge/docs', data),
+  docsUpdate: (id: string, data: KnowledgeDocSave) => httpPut<void>(`/ai/knowledge/docs/${id}`, data),
+  ask: (question: string) => httpPost<AiAskResult>('/ai/knowledge/ask', { question }),
+  feedback: (recordId: string, useful: boolean) =>
+    httpPut<void>(`/ai/knowledge/qa-records/${recordId}/feedback`, { useful }),
+}
+
+// ---------- 异常建议助手（第 4 周） ----------
+export const assistantApi = {
+  suggest: (exceptionId: string) => httpPost<ExceptionSuggestion>('/ai/assistant/suggest', { exceptionId }),
+  save: (exceptionId: string, suggestion: string) =>
+    httpPost<void>('/ai/assistant/save', { exceptionId, suggestion }),
+  getSuggestion: (exceptionId: string) =>
+    httpGet<ExceptionSuggestion>(`/ai/assistant/suggestion/${exceptionId}`),
+}
+
+// ---------- 生产日报助手（第 4 周） ----------
+export const dailyApi = {
+  page: (params: DailyReportQuery) => httpGet<PageResult<DailyReport>>('/ai/daily/page', params),
+  preview: (reportDate: string) => httpPost<DailyPreview>('/ai/daily/preview', { reportDate }),
+  save: (data: DailyReportSave) => httpPost<void>('/ai/daily/save', data),
 }
