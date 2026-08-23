@@ -1,5 +1,6 @@
 package com.smartfactory.mes.ai.mapper;
 
+import com.smartfactory.mes.ai.dto.ActiveWorkOrderRow;
 import com.smartfactory.mes.ai.dto.EquipmentStatusRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -46,6 +47,12 @@ public interface DailyReportMapper {
     /** 进行中工单数（全量） */
     @Select("SELECT COUNT(*) FROM mes_work_order WHERE deleted = 0 AND status IN ('RELEASED', 'IN_PROGRESS')")
     Long activeWorkOrderCount();
+
+    /** 进行中/已下发工单列表（生产概况用，近 10 条） */
+    @Select("SELECT work_order_no, product_name_snapshot, plan_qty, completed_qty, status " +
+            "FROM mes_work_order WHERE deleted = 0 AND status IN ('RELEASED', 'IN_PROGRESS') " +
+            "ORDER BY id DESC LIMIT 10")
+    List<ActiveWorkOrderRow> listActiveWorkOrders();
 
     /** 设备状态分布（全量） */
     @Select("SELECT status, COUNT(*) AS cnt FROM mes_equipment WHERE deleted = 0 GROUP BY status")
