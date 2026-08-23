@@ -9,17 +9,24 @@ import com.smartfactory.mes.auth.mapper.SysUserMapper;
 import com.smartfactory.mes.common.api.ResultCode;
 import com.smartfactory.mes.common.exception.BusinessException;
 import com.smartfactory.mes.common.sequence.OrderNoGenerator;
+import com.smartfactory.mes.production.dto.BatchSnItemVO;
+import com.smartfactory.mes.production.dto.BatchSnTraceVO;
 import com.smartfactory.mes.production.dto.BatchTraceVO;
+import com.smartfactory.mes.production.dto.MaterialBatchUsageVO;
 import com.smartfactory.mes.production.dto.SnTraceVO;
 import com.smartfactory.mes.production.dto.TraceRecordVO;
 import com.smartfactory.mes.production.dto.WorkOrderVO;
 import com.smartfactory.mes.production.dto.WorkReportVO;
+import com.smartfactory.mes.production.entity.MesMaterialBatch;
 import com.smartfactory.mes.production.entity.MesProductSn;
+import com.smartfactory.mes.production.entity.MesReportMaterialBatch;
 import com.smartfactory.mes.production.entity.MesTraceRecord;
 import com.smartfactory.mes.production.entity.MesWorkOrder;
 import com.smartfactory.mes.production.entity.MesWorkReport;
 import com.smartfactory.mes.production.enums.ActionType;
+import com.smartfactory.mes.production.mapper.MesMaterialBatchMapper;
 import com.smartfactory.mes.production.mapper.MesProductSnMapper;
+import com.smartfactory.mes.production.mapper.MesReportMaterialBatchMapper;
 import com.smartfactory.mes.production.mapper.MesTraceRecordMapper;
 import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
 import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
@@ -29,8 +36,10 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,6 +60,8 @@ public class TraceServiceImpl implements TraceService {
     private final OrderNoGenerator orderNoGenerator;
     private final ObjectMapper objectMapper;
     private final WorkReportService workReportService;
+    private final MesMaterialBatchMapper materialBatchMapper;
+    private final MesReportMaterialBatchMapper reportMaterialBatchMapper;
 
     public TraceServiceImpl(MesTraceRecordMapper traceRecordMapper,
                             MesProductSnMapper productSnMapper,
@@ -61,7 +72,9 @@ public class TraceServiceImpl implements TraceService {
                             ObjectMapper objectMapper,
                             // 同模块双向依赖：报工写追溯（WorkReport → Trace），
                             // 批次追溯复用报工列表（Trace → WorkReport），@Lazy 打破构造环
-                            @Lazy WorkReportService workReportService) {
+                            @Lazy WorkReportService workReportService,
+                            MesMaterialBatchMapper materialBatchMapper,
+                            MesReportMaterialBatchMapper reportMaterialBatchMapper) {
         this.traceRecordMapper = traceRecordMapper;
         this.productSnMapper = productSnMapper;
         this.workOrderMapper = workOrderMapper;
@@ -70,6 +83,8 @@ public class TraceServiceImpl implements TraceService {
         this.orderNoGenerator = orderNoGenerator;
         this.objectMapper = objectMapper;
         this.workReportService = workReportService;
+        this.materialBatchMapper = materialBatchMapper;
+        this.reportMaterialBatchMapper = reportMaterialBatchMapper;
     }
 
     @Override
@@ -134,7 +149,113 @@ public class TraceServiceImpl implements TraceService {
             vo.setReportNo(report.getReportNo());
         }
         vo.setTimeline(listByWorkOrder(snRow.getWorkOrderId()));
+        // 第 6 周：出生工单全部报工的批次绑定行，按物料+批次聚合去重（13 道报工 → 每关键件 1 行，qtyUsed 求和）
+        vo.setMaterialBatches(listBatchUsageByWorkOrder(snRow.getWorkOrderId()));
         return vo;
+    }
+
+    @Override
+    public BatchSnTraceVO batchSnTrace(String batchNo) {
+        MesMaterialBatch batch = materialBatchMapper.selectOne(new LambdaQueryWrapper<MesMaterialBatch>()
+                .eq(MesMaterialBatch::getBatchNo, batchNo));
+        if (batch == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "物料批次不存在: batchNo=" + batchNo);
+        }
+        BatchSnTraceVO vo = new BatchSnTraceVO();
+        vo.setBatchId(batch.getId());
+        vo.setBatchNo(batch.getBatchNo());
+        vo.setMaterialId(batch.getMaterialId());
+        vo.setMaterialCodeSnapshot(batch.getMaterialCodeSnapshot());
+        vo.setMaterialNameSnapshot(batch.getMaterialNameSnapshot());
+        vo.setBatchQty(batch.getBatchQty());
+        vo.setUsedQty(batch.getUsedQty());
+        vo.setInDate(batch.getInDate());
+        vo.setSupplier(batch.getSupplier());
+        // 绑定记录（报工号回填）
+        List<MesReportMaterialBatch> binds = reportMaterialBatchMapper.selectList(
+                new LambdaQueryWrapper<MesReportMaterialBatch>()
+                        .eq(MesReportMaterialBatch::getBatchId, batch.getId())
+                        .orderByAsc(MesReportMaterialBatch::getId));
+        Set<Long> reportIds = binds.stream().map(MesReportMaterialBatch::getReportId).collect(Collectors.toSet());
+        Map<Long, MesWorkReport> reports = reportIds.isEmpty() ? Collections.emptyMap()
+                : workReportMapper.selectBatchIds(reportIds).stream()
+                .collect(Collectors.toMap(MesWorkReport::getId, Function.identity()));
+        vo.setBindings(binds.stream().map(b -> {
+            MaterialBatchUsageVO usage = new MaterialBatchUsageVO();
+            usage.setReportId(b.getReportId());
+            MesWorkReport r = reports.get(b.getReportId());
+            usage.setReportNo(r == null ? null : r.getReportNo());
+            usage.setBatchId(b.getBatchId());
+            usage.setBatchNo(b.getBatchNoSnapshot());
+            usage.setMaterialId(b.getMaterialId());
+            usage.setMaterialCodeSnapshot(b.getMaterialCodeSnapshot());
+            usage.setMaterialNameSnapshot(b.getMaterialNameSnapshot());
+            usage.setQtyUsed(b.getQtyUsed());
+            usage.setCreatedAt(b.getCreatedAt());
+            return usage;
+        }).collect(Collectors.toList()));
+        // 工单去重
+        Set<Long> workOrderIds = binds.stream().map(MesReportMaterialBatch::getWorkOrderId).collect(Collectors.toSet());
+        List<WorkOrderVO> workOrders = workOrderIds.isEmpty() ? Collections.emptyList()
+                : workOrderMapper.selectBatchIds(workOrderIds).stream()
+                .sorted(Comparator.comparing(MesWorkOrder::getId))
+                .map(WorkOrderVO::of)
+                .collect(Collectors.toList());
+        vo.setWorkOrders(workOrders);
+        // 这些工单铸出的整机 SN（id 升序，工单号回填）
+        List<MesProductSn> sns = workOrderIds.isEmpty() ? Collections.emptyList()
+                : productSnMapper.selectList(new LambdaQueryWrapper<MesProductSn>()
+                .in(MesProductSn::getWorkOrderId, workOrderIds)
+                .orderByAsc(MesProductSn::getId));
+        Map<Long, String> workOrderNos = workOrders.stream()
+                .collect(Collectors.toMap(WorkOrderVO::getId, WorkOrderVO::getWorkOrderNo));
+        vo.setSns(sns.stream().map(s -> {
+            BatchSnItemVO item = new BatchSnItemVO();
+            item.setId(s.getId());
+            item.setSn(s.getSn());
+            item.setWorkOrderId(s.getWorkOrderId());
+            item.setWorkOrderNo(workOrderNos.get(s.getWorkOrderId()));
+            item.setProductNameSnapshot(s.getProductNameSnapshot());
+            item.setCreatedAt(s.getCreatedAt());
+            return item;
+        }).collect(Collectors.toList()));
+        return vo;
+    }
+
+    /**
+     * 某工单全部报工的批次绑定行按物料+批次聚合去重（SN 追溯关键件批次区数据源）
+     */
+    private List<MaterialBatchUsageVO> listBatchUsageByWorkOrder(Long workOrderId) {
+        List<MesReportMaterialBatch> binds = reportMaterialBatchMapper.selectList(
+                new LambdaQueryWrapper<MesReportMaterialBatch>()
+                        .eq(MesReportMaterialBatch::getWorkOrderId, workOrderId)
+                        .orderByAsc(MesReportMaterialBatch::getId));
+        if (binds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Set<Long> reportIds = binds.stream().map(MesReportMaterialBatch::getReportId).collect(Collectors.toSet());
+        Map<Long, MesWorkReport> reports = workReportMapper.selectBatchIds(reportIds).stream()
+                .collect(Collectors.toMap(MesWorkReport::getId, Function.identity()));
+        Map<String, MaterialBatchUsageVO> agg = new LinkedHashMap<>();
+        for (MesReportMaterialBatch b : binds) {
+            String key = b.getMaterialId() + "|" + b.getBatchNoSnapshot();
+            MaterialBatchUsageVO usage = agg.computeIfAbsent(key, k -> {
+                MaterialBatchUsageVO u = new MaterialBatchUsageVO();
+                u.setReportId(b.getReportId());
+                MesWorkReport r = reports.get(b.getReportId());
+                u.setReportNo(r == null ? null : r.getReportNo());
+                u.setBatchId(b.getBatchId());
+                u.setBatchNo(b.getBatchNoSnapshot());
+                u.setMaterialId(b.getMaterialId());
+                u.setMaterialCodeSnapshot(b.getMaterialCodeSnapshot());
+                u.setMaterialNameSnapshot(b.getMaterialNameSnapshot());
+                u.setQtyUsed(0);
+                u.setCreatedAt(b.getCreatedAt());
+                return u;
+            });
+            usage.setQtyUsed(usage.getQtyUsed() + b.getQtyUsed());
+        }
+        return new ArrayList<>(agg.values());
     }
 
     @Override

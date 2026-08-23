@@ -1,5 +1,6 @@
 package com.smartfactory.mes.production.service;
 
+import com.smartfactory.mes.production.dto.BatchSnTraceVO;
 import com.smartfactory.mes.production.dto.BatchTraceVO;
 import com.smartfactory.mes.production.dto.SnTraceVO;
 import com.smartfactory.mes.production.dto.TraceRecordVO;
@@ -42,4 +43,12 @@ public interface TraceService {
      * @param batchNo 生产批次号
      */
     BatchTraceVO batchTrace(String batchNo);
+
+    /**
+     * 按物料批次号反查（第 6 周）：批次台账 + 全部绑定记录 + 涉及工单去重 +
+     * 工单铸出的整机 SN 列表（批次不存在 404）
+     *
+     * @param batchNo 物料批次号（MB 前缀）
+     */
+    BatchSnTraceVO batchSnTrace(String batchNo);
 }

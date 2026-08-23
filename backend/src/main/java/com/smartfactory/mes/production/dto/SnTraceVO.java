@@ -26,4 +26,7 @@ public class SnTraceVO {
 
     /** 出生工单全时间线（复用 listByWorkOrder，按动作时间升序） */
     private List<TraceRecordVO> timeline;
+
+    /** 关键件批次使用情况（第 6 周：出生工单全部报工绑定行按物料+批次聚合去重） */
+    private List<MaterialBatchUsageVO> materialBatches;
 }

@@ -2,6 +2,7 @@ package com.smartfactory.mes.production.controller;
 
 import com.smartfactory.mes.auth.RequirePermission;
 import com.smartfactory.mes.common.api.ApiResult;
+import com.smartfactory.mes.production.dto.BatchSnTraceVO;
 import com.smartfactory.mes.production.dto.BatchTraceVO;
 import com.smartfactory.mes.production.dto.SnTraceVO;
 import com.smartfactory.mes.production.dto.TraceRecordVO;
@@ -43,5 +44,11 @@ public class TraceController {
     @GetMapping("/batch")
     public ApiResult<BatchTraceVO> byBatch(@RequestParam String batchNo) {
         return ApiResult.success(traceService.batchTrace(batchNo));
+    }
+
+    /** 按物料批次号反查（第 6 周）：批次台账 + 绑定记录 + 工单去重 + 整机 SN 列表（不存在 404） */
+    @GetMapping("/batch-sns")
+    public ApiResult<BatchSnTraceVO> byMaterialBatch(@RequestParam String batchNo) {
+        return ApiResult.success(traceService.batchSnTrace(batchNo));
     }
 }

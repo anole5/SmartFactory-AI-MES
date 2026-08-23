@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 报工入参：合格 + 不良 = 报工数量由 Service 强校验（DTO 只做基本约束）
@@ -42,4 +43,10 @@ public class WorkReportSaveDTO {
 
     @Size(max = 255, message = "备注最长 255 位")
     private String remark;
+
+    /**
+     * 关键件批次绑定（第 6 周，可选）：报工事务内绑定，校验失败整单回滚；
+     * 旧调用方（冒烟脚本等）不传此字段零影响
+     */
+    private List<MaterialBatchBindDTO> materialBatchBindings;
 }

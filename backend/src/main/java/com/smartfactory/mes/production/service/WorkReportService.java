@@ -1,6 +1,7 @@
 package com.smartfactory.mes.production.service;
 
 import com.smartfactory.mes.common.api.PageResult;
+import com.smartfactory.mes.production.dto.MaterialBatchBindDTO;
 import com.smartfactory.mes.production.dto.WorkReportQueryDTO;
 import com.smartfactory.mes.production.dto.WorkReportSaveDTO;
 import com.smartfactory.mes.production.dto.WorkReportVO;
@@ -20,4 +21,10 @@ public interface WorkReportService {
 
     /** 报工：校验链 + CAS 累计 + 状态结转 + 工单进度回写（整单事务，任一步失败全部回滚） */
     void report(WorkReportSaveDTO dto);
+
+    /**
+     * 补录关键件批次绑定（第 6 周，独立事务）：报工后漏绑可补录，
+     * 校验规则与报工内嵌绑定共用（批次存在/物料匹配/关键件/同料换批拦截/重放幂等）
+     */
+    void bindBatches(Long reportId, List<MaterialBatchBindDTO> items);
 }

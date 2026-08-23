@@ -9,22 +9,30 @@ import com.smartfactory.mes.auth.CurrentUserContext;
 import com.smartfactory.mes.auth.entity.SysUser;
 import com.smartfactory.mes.auth.mapper.SysUserMapper;
 import com.smartfactory.mes.common.api.PageResult;
+import com.smartfactory.mes.common.api.ResultCode;
 import com.smartfactory.mes.common.exception.BusinessException;
 import com.smartfactory.mes.common.sequence.OrderNoGenerator;
 import com.smartfactory.mes.integration.erp.service.ErpOrderService;
 import com.smartfactory.mes.integration.wms.service.WmsService;
+import com.smartfactory.mes.master.entity.MesMaterial;
+import com.smartfactory.mes.master.service.MaterialService;
+import com.smartfactory.mes.production.dto.MaterialBatchBindDTO;
 import com.smartfactory.mes.production.dto.WorkReportQueryDTO;
 import com.smartfactory.mes.production.dto.WorkReportSaveDTO;
 import com.smartfactory.mes.production.dto.WorkReportVO;
+import com.smartfactory.mes.production.entity.MesMaterialBatch;
 import com.smartfactory.mes.production.entity.MesOperationTask;
 import com.smartfactory.mes.production.entity.MesProductSn;
+import com.smartfactory.mes.production.entity.MesReportMaterialBatch;
 import com.smartfactory.mes.production.entity.MesWorkOrder;
 import com.smartfactory.mes.production.entity.MesWorkReport;
 import com.smartfactory.mes.production.enums.ActionType;
 import com.smartfactory.mes.production.enums.TaskStatus;
 import com.smartfactory.mes.production.enums.WorkOrderStatus;
+import com.smartfactory.mes.production.mapper.MesMaterialBatchMapper;
 import com.smartfactory.mes.production.mapper.MesOperationTaskMapper;
 import com.smartfactory.mes.production.mapper.MesProductSnMapper;
+import com.smartfactory.mes.production.mapper.MesReportMaterialBatchMapper;
 import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
 import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
 import com.smartfactory.mes.production.service.TraceService;
@@ -78,6 +86,9 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
     private final InspectionTaskService inspectionTaskService;
     private final ErpOrderService erpOrderService;
     private final WmsService wmsService;
+    private final MaterialService materialService;
+    private final MesMaterialBatchMapper materialBatchMapper;
+    private final MesReportMaterialBatchMapper reportMaterialBatchMapper;
 
     public WorkReportServiceImpl(MesOperationTaskMapper operationTaskMapper,
                                  MesWorkOrderMapper workOrderMapper,
@@ -87,7 +98,10 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
                                  TraceService traceService,
                                  InspectionTaskService inspectionTaskService,
                                  ErpOrderService erpOrderService,
-                                 WmsService wmsService) {
+                                 WmsService wmsService,
+                                 MaterialService materialService,
+                                 MesMaterialBatchMapper materialBatchMapper,
+                                 MesReportMaterialBatchMapper reportMaterialBatchMapper) {
         this.operationTaskMapper = operationTaskMapper;
         this.workOrderMapper = workOrderMapper;
         this.productSnMapper = productSnMapper;
@@ -97,6 +111,9 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
         this.inspectionTaskService = inspectionTaskService;
         this.erpOrderService = erpOrderService;
         this.wmsService = wmsService;
+        this.materialService = materialService;
+        this.materialBatchMapper = materialBatchMapper;
+        this.reportMaterialBatchMapper = reportMaterialBatchMapper;
     }
 
     @Override
@@ -189,6 +206,11 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
         traceService.write(task.getWorkOrderId(), dto.getTaskId(), ActionType.REPORT,
                 Map.of("reportNo", report.getReportNo(), "reportQty", reportQty,
                         "goodQty", dto.getGoodQty(), "defectQty", dto.getDefectQty()));
+        // ⑤.5（第 6 周）内嵌关键件批次绑定：校验失败抛 409 整单回滚（报工落库 + 绑定同事务）；
+        // 旧调用方不传 materialBatchBindings 直接跳过，139 旧断言零影响
+        if (dto.getMaterialBatchBindings() != null && !dto.getMaterialBatchBindings().isEmpty()) {
+            bindBatchesInternal(report, dto.getMaterialBatchBindings());
+        }
         // ⑦ 最后一道工序：累计回写工单（完成数量 = 最后一道累计合格+不良，合格 = 最后一道累计合格）；
         // 最后一道 COMPLETED → 工单 COMPLETED + 实际完工时间（CAS 翻转，0 行说明已 COMPLETED，静默跳过）
         MesOperationTask lastSeq = operationTaskMapper.selectOne(new QueryWrapper<MesOperationTask>()
@@ -247,6 +269,75 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
                             task.getWorkOrderId(), e);
                 }
             }
+        }
+    }
+
+    @Override
+    @Transactional
+    public void bindBatches(Long reportId, List<MaterialBatchBindDTO> items) {
+        if (items == null || items.isEmpty()) {
+            throw new BusinessException("绑定列表不能为空");
+        }
+        MesWorkReport report = this.getById(reportId);
+        if (report == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "报工记录不存在: id=" + reportId);
+        }
+        bindBatchesInternal(report, items);
+    }
+
+    /**
+     * 关键件批次绑定核心（报工内嵌 + 补录两通道共用，调用方已开事务）：
+     * ① 批次必须存在；② 批次物料必须与入参一致；③ 物料必须 trace_required=1；
+     * ④ 同 (报工,物料,批次) 重放幂等跳过；⑤ 同 (报工,物料) 换批 409 拦截（绑定只增不改）。
+     * 成功：插绑定行（快照回填）+ 批次 used_qty 按报工台数累加 + 写 BATCH_BIND 追溯。
+     */
+    private void bindBatchesInternal(MesWorkReport report, List<MaterialBatchBindDTO> items) {
+        for (MaterialBatchBindDTO item : items) {
+            MesMaterialBatch batch = materialBatchMapper.selectOne(new LambdaQueryWrapper<MesMaterialBatch>()
+                    .eq(MesMaterialBatch::getBatchNo, item.getBatchNo()));
+            if (batch == null) {
+                throw new BusinessException("物料批次不存在: batchNo=" + item.getBatchNo());
+            }
+            if (!batch.getMaterialId().equals(item.getMaterialId())) {
+                throw new BusinessException("批次与物料不匹配: batchNo=" + item.getBatchNo()
+                        + ", materialId=" + item.getMaterialId());
+            }
+            MesMaterial material = materialService.getById(item.getMaterialId());
+            if (material == null) {
+                throw new BusinessException("物料不存在: id=" + item.getMaterialId());
+            }
+            if (!Boolean.TRUE.equals(material.getTraceRequired())) {
+                throw new BusinessException("非关键件物料不需要批次绑定: " + material.getMaterialCode());
+            }
+            // 同报工同物料已绑过：同批次重放幂等跳过（补录接口可安全重试）；换批次 409
+            MesReportMaterialBatch existing = reportMaterialBatchMapper.selectOne(
+                    new LambdaQueryWrapper<MesReportMaterialBatch>()
+                            .eq(MesReportMaterialBatch::getReportId, report.getId())
+                            .eq(MesReportMaterialBatch::getMaterialId, item.getMaterialId()));
+            if (existing != null) {
+                if (existing.getBatchNoSnapshot().equals(batch.getBatchNo())) {
+                    continue;
+                }
+                throw new BusinessException("该报工已绑定物料批次: " + material.getMaterialName()
+                        + " (" + existing.getBatchNoSnapshot() + ")");
+            }
+            MesReportMaterialBatch bind = new MesReportMaterialBatch();
+            bind.setReportId(report.getId());
+            bind.setWorkOrderId(report.getWorkOrderId());
+            bind.setMaterialId(material.getId());
+            bind.setMaterialCodeSnapshot(material.getMaterialCode());
+            bind.setMaterialNameSnapshot(material.getMaterialName());
+            bind.setBatchId(batch.getId());
+            bind.setBatchNoSnapshot(batch.getBatchNo());
+            bind.setQtyUsed(report.getReportQty());
+            reportMaterialBatchMapper.insert(bind);
+            // 批次台账已用量按台数累加（展示口径）
+            materialBatchMapper.update(null, new LambdaUpdateWrapper<MesMaterialBatch>()
+                    .eq(MesMaterialBatch::getId, batch.getId())
+                    .setSql("used_qty = used_qty + " + report.getReportQty()));
+            traceService.write(report.getWorkOrderId(), report.getTaskId(), ActionType.BATCH_BIND,
+                    Map.of("reportNo", report.getReportNo(), "materialCode", material.getMaterialCode(),
+                            "batchNo", batch.getBatchNo(), "qtyUsed", report.getReportQty()));
         }
     }
 
