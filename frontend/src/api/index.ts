@@ -4,6 +4,15 @@ import type {
   Bom,
   BomQuery,
   BomSave,
+  DefectQuery,
+  DefectRecord,
+  ExceptionOrder,
+  ExceptionQuery,
+  ExceptionSave,
+  InspectionRecord,
+  InspectionRecordSave,
+  InspectionTask,
+  InspectionTaskQuery,
   LoginResult,
   Material,
   MaterialQuery,
@@ -137,4 +146,32 @@ export const routeApi = {
   changeStatus: (id: string, status: string) =>
     httpPut<void>(`/master/routes/${id}/status`, { status }),
   remove: (id: string) => httpDelete<void>(`/master/routes/${id}`),
+}
+
+// ---------- 质检任务（第 3 周） ----------
+export const inspectionTaskApi = {
+  page: (params: InspectionTaskQuery) =>
+    httpGet<PageResult<InspectionTask>>('/quality/inspection-tasks/page', params),
+  records: (id: string) => httpGet<InspectionRecord[]>(`/quality/inspection-tasks/${id}/records`),
+  start: (id: string) => httpPut<void>(`/quality/inspection-tasks/${id}/start`),
+}
+
+// ---------- 质检录入（第 3 周） ----------
+export const inspectionRecordApi = {
+  create: (data: InspectionRecordSave) => httpPost<void>('/quality/inspection-records', data),
+}
+
+// ---------- 不良记录（第 3 周） ----------
+export const defectApi = {
+  page: (params: DefectQuery) => httpGet<PageResult<DefectRecord>>('/quality/defects/page', params),
+  toException: (id: string) => httpPut<string>(`/quality/defects/${id}/to-exception`),
+}
+
+// ---------- 异常单（第 3 周） ----------
+export const exceptionApi = {
+  page: (params: ExceptionQuery) => httpGet<PageResult<ExceptionOrder>>('/quality/exceptions/page', params),
+  create: (data: ExceptionSave) => httpPost<string>('/quality/exceptions', data),
+  process: (id: string) => httpPut<void>(`/quality/exceptions/${id}/process`),
+  close: (id: string, resolveRemark: string) =>
+    httpPut<void>(`/quality/exceptions/${id}/close`, { resolveRemark }),
 }

@@ -69,6 +69,24 @@ const router = createRouter({
           meta: { title: '报工记录' },
         },
         {
+          path: 'inspection-tasks',
+          name: 'inspection-tasks',
+          component: () => import('@/views/inspection-tasks/index.vue'),
+          meta: { title: '质检任务' },
+        },
+        {
+          path: 'defects',
+          name: 'defects',
+          component: () => import('@/views/defects/index.vue'),
+          meta: { title: '不良记录' },
+        },
+        {
+          path: 'exceptions',
+          name: 'exceptions',
+          component: () => import('@/views/exceptions/index.vue'),
+          meta: { title: '异常管理' },
+        },
+        {
           path: 'tv-demo',
           name: 'tv-demo',
           component: () => import('@/views/tv-demo/index.vue'),

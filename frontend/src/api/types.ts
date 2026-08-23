@@ -381,3 +381,118 @@ export interface TraceRecord {
   operatorName?: string
   actionDetail?: string
 }
+
+// ---------- 质检任务（第 3 周） ----------
+export interface InspectionTask {
+  id: string
+  inspectionTaskNo: string
+  workOrderId: string
+  workOrderNo?: string
+  operationTaskId: string
+  processCodeSnapshot?: string
+  processNameSnapshot?: string
+  workstationId?: string | null
+  planQty: number
+  inspectedQty: number
+  goodQty: number
+  defectQty: number
+  status: string
+  inspectorId?: string | null
+  inspectorName?: string
+  startTime?: string
+  endTime?: string
+  remark?: string
+}
+
+export interface InspectionTaskQuery extends PageQuery {
+  workOrderId?: string
+  status?: string
+  keyword?: string
+}
+
+// ---------- 质检记录（第 3 周） ----------
+export interface InspectionRecord {
+  id: string
+  inspectionRecordNo: string
+  inspectionTaskId: string
+  workOrderId: string
+  operationTaskId: string
+  goodQty: number
+  defectQty: number
+  inspectTime?: string
+  inspectorId: string
+  inspectorName?: string
+  remark?: string
+}
+
+/** 检验录入不良行 */
+export interface DefectItem {
+  defectCode: string
+  defectQty: number
+  remark?: string
+}
+
+export interface InspectionRecordSave {
+  inspectionTaskId: string
+  goodQty: number
+  defectQty: number
+  defectItems?: DefectItem[]
+  remark?: string
+}
+
+// ---------- 不良记录（第 3 周） ----------
+export interface DefectRecord {
+  id: string
+  defectNo: string
+  inspectionRecordId: string
+  inspectionTaskId: string
+  workOrderId: string
+  workOrderNo?: string
+  operationTaskId: string
+  processCodeSnapshot?: string
+  processNameSnapshot?: string
+  defectCode: string
+  defectQty: number
+  remark?: string
+}
+
+export interface DefectQuery extends PageQuery {
+  workOrderId?: string
+  defectCode?: string
+  keyword?: string
+}
+
+// ---------- 异常单（第 3 周） ----------
+export interface ExceptionOrder {
+  id: string
+  exceptionNo: string
+  sourceType: string
+  defectRecordId?: string | null
+  defectNo?: string
+  workOrderId?: string | null
+  workOrderNo?: string
+  operationTaskId?: string | null
+  inspectionTaskId?: string | null
+  defectCode?: string
+  description: string
+  status: string
+  handlerId?: string | null
+  handlerName?: string
+  resolveRemark?: string
+  resolvedAt?: string
+  createdAt?: string
+}
+
+export interface ExceptionSave {
+  description: string
+  workOrderId?: string
+  operationTaskId?: string
+  inspectionTaskId?: string
+  defectCode?: string
+}
+
+export interface ExceptionQuery extends PageQuery {
+  workOrderId?: string
+  status?: string
+  keyword?: string
+}

@@ -59,6 +59,52 @@ export const ACTION_TYPE: Record<string, string> = {
   RESUME: '继续',
   REPORT: '报工',
   CANCEL: '取消',
+  INSPECT_TASK: '生成质检任务',
+  INSPECT: '质检录入',
+  DEFECT: '不良登记',
+  EXCEPTION_CREATE: '创建异常单',
+  EXCEPTION_PROCESS: '处理异常',
+  EXCEPTION_CLOSE: '关闭异常',
+}
+
+/** 质检任务状态机（第 3 周） */
+export const INSPECTION_TASK_STATUS: Record<string, string> = {
+  PENDING: '待检验',
+  INSPECTING: '检验中',
+  COMPLETED: '已完成',
+  CANCELLED: '已取消',
+}
+
+/** 异常单状态机（第 3 周） */
+export const EXCEPTION_STATUS: Record<string, string> = {
+  OPEN: '待处理',
+  PROCESSING: '处理中',
+  CLOSED: '已关闭',
+}
+
+/** 异常单来源（第 3 周） */
+export const EXCEPTION_SOURCE_TYPE: Record<string, string> = {
+  DEFECT: '不良生成',
+  MANUAL: '手工创建',
+}
+
+/** 设备状态（第 3 周：状态漂移模拟，任意切换） */
+export const EQUIPMENT_STATUS: Record<string, string> = {
+  RUNNING: '运行',
+  IDLE: '空闲',
+  STOPPED: '停机',
+  MAINTENANCE: '维护',
+}
+
+/** 不良编码字典（检验录入下拉，对齐演示文档异常清单） */
+export const DEFECT_CODES: Record<string, string> = {
+  BLACK_SCREEN: '黑屏',
+  FLOWER_SCREEN: '花屏',
+  NO_SOUND: '无声音',
+  HDMI_ABNORMAL: 'HDMI 接口异常',
+  BURN_FAIL: '烧录失败',
+  AGING_RESTART: '老化重启',
+  ACCESSORY_MISSING: '附件缺失',
 }
 
 /** 状态对应的 el-tag 颜色类型 */
@@ -80,6 +126,12 @@ export const STATUS_TAG_TYPE: Record<string, 'success' | 'info' | 'warning' | 'd
   HIGH: 'danger',
   NORMAL: 'info',
   LOW: 'info',
+  INSPECTING: 'primary',
+  OPEN: 'danger',
+  PROCESSING: 'warning',
+  IDLE: 'info',
+  STOPPED: 'danger',
+  MAINTENANCE: 'warning',
 }
 
 /** 字典取值（找不到时原样返回，避免字典漏配时页面空白） */

@@ -40,6 +40,20 @@
         <el-menu-item index="/reports">
           <el-icon><DataLine /></el-icon><span>报工记录</span>
         </el-menu-item>
+        <el-sub-menu index="quality">
+          <template #title>
+            <el-icon><Stamp /></el-icon><span>质量管理</span>
+          </template>
+          <el-menu-item index="/inspection-tasks">
+            <el-icon><CircleCheck /></el-icon><span>质检任务</span>
+          </el-menu-item>
+          <el-menu-item index="/defects">
+            <el-icon><WarningFilled /></el-icon><span>不良记录</span>
+          </el-menu-item>
+          <el-menu-item index="/exceptions">
+            <el-icon><Bell /></el-icon><span>异常管理</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/tv-demo">
           <el-icon><VideoPlay /></el-icon><span>电视 Demo</span>
         </el-menu-item>
@@ -104,6 +118,20 @@ async function handleLogout() {
 
 .aside :deep(.el-menu) {
   border-right: none;
+}
+
+/* 子菜单弹出层保持暗色风格 */
+.aside :deep(.el-menu--popup) {
+  background-color: #001529;
+}
+
+.aside :deep(.el-menu--popup .el-menu-item) {
+  background-color: #001529;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.aside :deep(.el-menu--popup .el-menu-item.is-active) {
+  color: #fff;
 }
 
 .header {
