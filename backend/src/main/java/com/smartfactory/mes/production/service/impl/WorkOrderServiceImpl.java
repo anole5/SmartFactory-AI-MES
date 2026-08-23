@@ -38,6 +38,7 @@ import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
 import com.smartfactory.mes.production.service.OperationTaskService;
 import com.smartfactory.mes.production.service.TraceService;
 import com.smartfactory.mes.production.service.WorkOrderService;
+import com.smartfactory.mes.quality.service.InspectionTaskService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -69,13 +70,15 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
     private final OrderNoGenerator orderNoGenerator;
     private final TraceService traceService;
     private final OperationTaskService operationTaskService;
+    private final InspectionTaskService inspectionTaskService;
 
     public WorkOrderServiceImpl(ProductMapper productMapper, BomMapper bomMapper,
                                 RouteMapper routeMapper, RouteStepMapper routeStepMapper,
                                 ProcessMapper processMapper, WorkstationMapper workstationMapper,
                                 MesOperationTaskMapper operationTaskMapper, MesWorkReportMapper reportMapper,
                                 OrderNoGenerator orderNoGenerator,
-                                TraceService traceService, OperationTaskService operationTaskService) {
+                                TraceService traceService, OperationTaskService operationTaskService,
+                                InspectionTaskService inspectionTaskService) {
         this.productMapper = productMapper;
         this.bomMapper = bomMapper;
         this.routeMapper = routeMapper;
@@ -87,6 +90,7 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
         this.orderNoGenerator = orderNoGenerator;
         this.traceService = traceService;
         this.operationTaskService = operationTaskService;
+        this.inspectionTaskService = inspectionTaskService;
     }
 
     @Override
@@ -171,8 +175,11 @@ public class WorkOrderServiceImpl extends ServiceImpl<MesWorkOrderMapper, MesWor
                             TaskStatus.RUNNING, TaskStatus.PAUSED)
                     .set(MesOperationTask::getStatus, TaskStatus.CANCELLED));
         }
+        // 级联取消未完成质检任务（第 3 周：PENDING/INSPECTING -> CANCELLED，已完成质检保留历史）
+        int cancelledInspectionTaskCount = inspectionTaskService.cancelByWorkOrder(id);
         traceService.write(wo.getId(), null, ActionType.CANCEL,
-                Map.of("workOrderNo", wo.getWorkOrderNo(), "cancelledTaskCount", cascadeCount));
+                Map.of("workOrderNo", wo.getWorkOrderNo(), "cancelledTaskCount", cascadeCount,
+                        "cancelledInspectionTaskCount", cancelledInspectionTaskCount));
     }
 
     @Override

@@ -15,16 +15,19 @@ import com.smartfactory.mes.production.dto.WorkReportQueryDTO;
 import com.smartfactory.mes.production.dto.WorkReportSaveDTO;
 import com.smartfactory.mes.production.dto.WorkReportVO;
 import com.smartfactory.mes.production.entity.MesOperationTask;
+import com.smartfactory.mes.production.entity.MesProductSn;
 import com.smartfactory.mes.production.entity.MesWorkOrder;
 import com.smartfactory.mes.production.entity.MesWorkReport;
 import com.smartfactory.mes.production.enums.ActionType;
 import com.smartfactory.mes.production.enums.TaskStatus;
 import com.smartfactory.mes.production.enums.WorkOrderStatus;
 import com.smartfactory.mes.production.mapper.MesOperationTaskMapper;
+import com.smartfactory.mes.production.mapper.MesProductSnMapper;
 import com.smartfactory.mes.production.mapper.MesWorkOrderMapper;
 import com.smartfactory.mes.production.mapper.MesWorkReportMapper;
 import com.smartfactory.mes.production.service.TraceService;
 import com.smartfactory.mes.production.service.WorkReportService;
+import com.smartfactory.mes.quality.service.InspectionTaskService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,8 +52,10 @@ import java.util.stream.Collectors;
  *       （WHERE status='RUNNING' AND completed_qty+本次<=plan_qty，
  *       达标自动 COMPLETED + 回填完工时间，MySQL 赋值自左向右故 IF 看到的是累加后值）</li>
  *   <li>插报工记录（只增不改）+ 写 REPORT 追溯</li>
+ *   <li>需质检工序达 COMPLETED → 生成质检任务（第 3 周，同事务）</li>
  *   <li>最后一道工序：累计回写工单（完成数量 = 最后一道累计合格+不良），
  *       最后一道 COMPLETED → 工单 COMPLETED + 实际完工时间</li>
+ *   <li>最后一道 COMPLETED 且合格&gt;0 → 批量生成整机 SN（第 3 周，同事务）</li>
  * </ol>
  */
 @Service
@@ -59,20 +64,26 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
 
     private final MesOperationTaskMapper operationTaskMapper;
     private final MesWorkOrderMapper workOrderMapper;
+    private final MesProductSnMapper productSnMapper;
     private final SysUserMapper sysUserMapper;
     private final OrderNoGenerator orderNoGenerator;
     private final TraceService traceService;
+    private final InspectionTaskService inspectionTaskService;
 
     public WorkReportServiceImpl(MesOperationTaskMapper operationTaskMapper,
                                  MesWorkOrderMapper workOrderMapper,
+                                 MesProductSnMapper productSnMapper,
                                  SysUserMapper sysUserMapper,
                                  OrderNoGenerator orderNoGenerator,
-                                 TraceService traceService) {
+                                 TraceService traceService,
+                                 InspectionTaskService inspectionTaskService) {
         this.operationTaskMapper = operationTaskMapper;
         this.workOrderMapper = workOrderMapper;
+        this.productSnMapper = productSnMapper;
         this.sysUserMapper = sysUserMapper;
         this.orderNoGenerator = orderNoGenerator;
         this.traceService = traceService;
+        this.inspectionTaskService = inspectionTaskService;
     }
 
     @Override
@@ -150,8 +161,10 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
         report.setEndTime(dto.getEndTime() == null ? now : dto.getEndTime());
         report.setRemark(dto.getRemark());
         this.save(report);
-        // ⑥ 需质检工序完成后生成质检任务——第 3 周质检模块接入（触发点 TODO）
-        // TODO 第 3 周：if (fresh.getNeedInspection() && fresh.getStatus() == COMPLETED) 生成质检任务与异常单
+        // ⑥ 需质检工序达 COMPLETED → 生成质检任务（第 3 周接入：同事务，失败随报工整单回滚）
+        if (Boolean.TRUE.equals(fresh.getNeedInspection()) && fresh.getStatus() == TaskStatus.COMPLETED) {
+            inspectionTaskService.generateFromCompletedTask(task.getWorkOrderId(), fresh);
+        }
         traceService.write(task.getWorkOrderId(), dto.getTaskId(), ActionType.REPORT,
                 Map.of("reportNo", report.getReportNo(), "reportQty", reportQty,
                         "goodQty", dto.getGoodQty(), "defectQty", dto.getDefectQty()));
@@ -172,6 +185,23 @@ public class WorkReportServiceImpl extends ServiceImpl<MesWorkReportMapper, MesW
                         .eq(MesWorkOrder::getStatus, WorkOrderStatus.IN_PROGRESS)
                         .set(MesWorkOrder::getStatus, WorkOrderStatus.COMPLETED)
                         .set(MesWorkOrder::getActualEndTime, now));
+            }
+            // ⑧（第 3 周）最后一道 COMPLETED 且合格>0 → 按合格数量批量生成整机 SN。
+            // 守卫：部分报工（任务未 COMPLETED）不铸号，避免 SN 与实际完工台数不符；
+            // 已完成任务重复报工在①已被拒，不会重复铸号。取号与插表同事务，回滚不留半截号。
+            if (fresh.getStatus() == TaskStatus.COMPLETED && fresh.getGoodQty() > 0) {
+                MesWorkOrder wo = workOrderMapper.selectById(task.getWorkOrderId());
+                List<String> sns = orderNoGenerator.nextSnBatch(fresh.getGoodQty());
+                for (String sn : sns) {
+                    MesProductSn productSn = new MesProductSn();
+                    productSn.setSn(sn);
+                    productSn.setWorkOrderId(task.getWorkOrderId());
+                    productSn.setProductId(wo.getProductId());
+                    productSn.setProductCodeSnapshot(wo.getProductCodeSnapshot());
+                    productSn.setProductNameSnapshot(wo.getProductNameSnapshot());
+                    productSn.setReportId(report.getId());
+                    productSnMapper.insert(productSn);
+                }
             }
         }
     }
