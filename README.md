@@ -3,13 +3,13 @@
 轻量制造执行系统（MES）+ AI 工厂知识库。
 
 > 面向离散制造场景的学习/演示项目，第一版以 **AOC 55 英寸 4K 智能电视** 为 Demo 场景，
-> 覆盖产品、物料、BOM、工艺路线、生产工单、派工、报工、质检、追溯、异常、生产看板与 AI 应用。
+> 覆盖产品、物料、BOM、工艺路线、生产工单、派工、报工、质检、追溯、物料批次追溯、生产排程、报表中心、生产看板与 AI 应用。
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Java 17、Spring Boot 3.5.16、MyBatis-Plus 3.5.16、MySQL 8、Lombok |
+| 后端 | Java 17、Spring Boot 3.5.16、MyBatis-Plus 3.5.16、MySQL 8、Lombok、EasyExcel 4.0.3 |
 | 前端 | Vue 3、Vite、TypeScript、Element Plus、Pinia、Vue Router、Axios、ECharts |
 | 部署 | Docker（开发环境复用本机已有 MySQL 容器） |
 
@@ -46,6 +46,10 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/06-seed-week3.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/07-schema-week4.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/08-seed-week4.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/09-schema-week5.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/10-seed-week5.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/11-schema-week6.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/12-seed-week6.sql
 ```
 
 > 注意：Windows PowerShell 管道会以 GBK 破坏 UTF-8 内容，请在 Git Bash 中执行；
@@ -85,7 +89,7 @@ npm run dev
 AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助手）**四角色全员可用**（工人查 SOP 是核心场景）；
 差异只在写动作：知识库新建/编辑仅 admin，异常建议保存回写异常单仅 admin + qa。
 
-### 4. 演示路径（第 1-3 周业务闭环 → 第 4 周 AI 应用）
+### 4. 演示路径（第 1-3 周业务闭环 → 第 4 周 AI 应用 → 第 5 周系统集成 → 第 6 周生产深化）
 
 1. **admin** 登录 → 生产工单 → 新建（选 TV-AOC-55U4K-001，自动解析其生效 BOM/工艺路线）
    → 下发 → 自动生成 13 个工序任务（详情抽屉可看追溯时间线）
@@ -109,12 +113,20 @@ AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助�
 14. **ERP 订单（系统集成）**：planning 登录 → 模拟下单（外部订单 PENDING）→ admin 一键转工单（自动生成生产工单并回填关联）→ 工单按正常流程生产
 15. **WMS 库存（系统集成）**：planning 对 ERP 推单工单领料（按 BOM 关键物料自动计算用量）→ 未领料开工被 409 拦截 → 13 道报满后外部订单自动 DONE + 合格品自动成品入库（流水可查）
 16. **动态菜单（角色差异）**：admin/planning 侧边栏多出「系统集成」目录（ERP 订单 + WMS 库存），operator/qa 登录看不到——同一套代码按登录人菜单树渲染；刷新不丢、退出换账号不残留旧路由
+17. **物料批次追溯**：admin 在追溯查询页「按物料批次」新建关键件批次 → operator 报工弹窗内为关键件
+    选批次（下拉带剩余量）→ 按 SN 反查整机用到的关键件批次 / 按批次反查绑定报工 + 涉及工单 + 整机 SN
+    （正反向闭环）；漏绑可对报工记录补录（幂等）
+18. **生产排程（甘特图）**：planning 建单下发（不派工不报工）→ 生产排程页点「执行排程」→ 甘特图按工位
+    展示横道（工单配色图例、同工位串行不重叠、tooltip 完整信息）→ 重跑覆盖幂等；排程起点为当日 08:00，
+    下午执行时横道标红（已逾期）属预期
+19. **报表中心**：日/周/月三粒度切换 → 汇总卡片（合格/不良/良率/报工数/工单数/统计窗口）+ 明细表
+    （日报按工序分组）→ 导出 Excel（汇总 + 明细双 sheet，中文文件名）
 
 ### 冒烟测试
 
 ```bash
 # 后端启动后执行（Node 18+ 内置 fetch，无需安装依赖）
-# 162 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）
+# 183 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）+ 第 6 周生产深化（物料批次/排程/报表）
 node scripts/smoke.mjs
 
 # 冒烟数据一键清理回种子状态（Git Bash）
@@ -134,6 +146,8 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | 产品 | GET/POST/PUT/DELETE | `/api/master/products/{id}` | 详情/创建/修改/逻辑删除 |
 | 产品 | PUT | `/api/master/products/{id}/status` | 启停用（存在生效 BOM/路线时禁停用） |
 | 物料 | 同产品结构 | `/api/master/materials/*` | 被 BOM 明细引用禁删 |
+| 物料批次 | GET | `/api/production/material-batches/page` | 批次分页（materialId/keyword，含剩余量 remainingQty） |
+| 物料批次 | POST | `/api/production/material-batches` | 新建批次（batchNo 自动生成 MB+日期+流水；perm material-batch:create） |
 | 工序 | 同产品结构（无状态） | `/api/master/processes/*` | 被路线步骤引用禁删 |
 | 工位 | 同产品结构 | `/api/master/workstations/*` | 被路线步骤引用禁删 |
 | BOM | GET/POST/PUT/DELETE | `/api/master/boms/{id}` | 头+明细整单提交；仅 DRAFT 可改/删 |
@@ -149,10 +163,16 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | 任务 | PUT | `/api/production/tasks/{id}/start`、`/pause`、`/resume` | 开工（级联工单 IN_PROGRESS）/暂停/继续 |
 | 报工 | POST | `/api/production/reports` | 报工（数量校验链 + 进度回写 + 追溯记录） |
 | 报工 | GET | `/api/production/reports/page` | 分页（workOrderId/operatorId） |
+| 报工 | POST | `/api/production/reports/{id}/bind-batch` | 补录关键件批次绑定（body 为裸数组 [{materialId,batchNo}]，幂等重放 200） |
 | 追溯 | GET | `/api/production/traces?workOrderId=` | 工单追溯时间线 |
 | 追溯 | GET | `/api/production/traces/sn?sn=` | 按 SN 追溯（出生信息 + 时间线，未知 404） |
 | 追溯 | GET | `/api/production/traces/batch?batchNo=` | 按批次追溯（报工列表 + 工单去重） |
+| 追溯 | GET | `/api/production/traces/batch-sns?batchNo=` | 按物料批次反查（批次主数据 + 绑定报工 + 涉及工单 + 整机 SN） |
 | SN | GET | `/api/production/sns/page` | 整机 SN 分页（workOrderId/keyword） |
+| 排程 | POST | `/api/production/schedule/run` | 执行排程（优先级→交期排序，同工位串行；重跑覆盖幂等） |
+| 排程 | GET | `/api/production/schedule/gantt?date=` | 甘特图数据（工位/计划起止/状态/priority/isOverdue） |
+| 报表 | GET | `/api/production/reports-center/summary?type=&date=` | 日/周/月汇总（type=day/week/month，缺省今天；含良率与统计窗口） |
+| 报表 | GET | `/api/production/reports-center/export?type=&date=` | Excel 导出（裸文件流不包 ApiResult；双 sheet + UTF-8 文件名） |
 | 质检 | GET | `/api/quality/inspection-tasks/page`、`/{id}`、`/{id}/records` | 任务分页/详情/任务全部记录 |
 | 质检 | PUT | `/api/quality/inspection-tasks/{id}/start` | 开始检验（CAS PENDING→INSPECTING） |
 | 质检 | POST | `/api/quality/inspection-records` | 检验录入（合格/不良数 + 不良行子表，分次累计 CAS） |
@@ -244,10 +264,27 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 28. **前端动态路由 = 后端菜单树驱动**：登录后拉 `/auth/menus`，组件按
     `import.meta.glob` 路径约定反查（/products → views/products/index.vue，新页面零注册）；
     菜单接口失败降级本地静态树（不白屏）；退出/401 时 removeRoute 防换账号残留旧路由。
+29. **物料批次双通道绑定**：报工主通道（DTO 可选字段，旧 payload 零影响）+ 补录通道
+    （POST bind-batch）共用同一私有校验方法；同 (report,material) 重放幂等、换批 409——
+    「报工漏绑后补录」的演示闭环设计。
+30. **排程结果直接落任务表**：ALTER 两列 plan_start_time/plan_end_time 而非独立排程表——
+    gantt 零 join 直读、重跑 UPDATE 覆盖即幂等、clean-smoke 无新增清理；
+    完成/取消任务保留旧值不重算（历史单据不可变原则）。
+31. **排程算法纯内存 + 单行 UPDATE**：优先级→交期→id 全局排序，工位分组内串行推进
+    cursor（今日 08:00 起），时长 = ceil(标准工时×计划数)——演示规模内存排程简单直观，
+    生产可换 APS 引擎不动接口。
+32. **甘特图 custom series renderItem**：x 轴 value 毫秒 + y 轴 category 工位，
+    api.coord 两端点换算横道；颜色 = 工单 id%调色板，逾期红色加粗；
+    跨日任务两天各显示一次、裁切到当日窗口。
+33. **EasyExcel 裸文件流不包 ApiResult**：导出接口直写字节流（Content-Disposition
+    `filename*=UTF-8''` 中文名）；前端 downloadRequest 裸 axios 实例（仅 token 拦截器）
+    绕开解包拦截器——Blob 会被 JSON 拦截器误解析。
+34. **报表聚合口径统一 created_at**：mes_work_report 无 report_time 列，与 DashboardMapper
+    `DATE(created_at)=CURDATE()` 口径一致；区间左闭右开 `created_at >= start AND < end`。
 
 ## 开发进度
 
-> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md)
+> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md) · [第 6 周完成报告](docs/week6-report.md)
 > 另有 [10 步演示脚本](docs/demo-script.md) 与 [简历项目描述](docs/resume.md)。
 
 - [x] 第 1 周：工程骨架 + 基础资料（产品/物料/BOM/工艺路线/工序/工位）+ 电视 Demo 大屏
@@ -255,4 +292,5 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 - [x] 第 3 周：质量追溯看板（质检任务/检验录入/不良/异常 + SN/批次追溯 + 设备漂移模拟 + ECharts 大屏）
 - [x] 第 4 周：AI 应用与项目包装（DeepSeek 双档接入 + 知识库 RAG + 异常建议 + 生产日报 + 统一 AI 助手）
 - [x] 第 5 周：系统集成（ERP 模拟下单一键转工单 / WMS 采购入库与工单领料 / 前端动态路由菜单树驱动）
-- [ ] 第 6 周（可选）：物料追溯、生产排程、AI 回答 SSE 流式
+- [x] 第 6 周：生产深化（物料批次追溯正反闭环 / 生产排程甘特图 / 报表中心三粒度 + Excel 导出）
+- [ ] 第 7 周（可选）：AI 回答 SSE 流式 / 向量 RAG 升级
