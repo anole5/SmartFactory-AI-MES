@@ -76,4 +76,10 @@ public class MesOperationTask extends BaseEntity {
 
     /** 实际完工时间（任务 COMPLETED 时回填） */
     private LocalDateTime endTime;
+
+    /** 计划开始时间（第 6 周排程结果，重跑覆盖即幂等） */
+    private LocalDateTime planStartTime;
+
+    /** 计划结束时间（第 6 周排程结果） */
+    private LocalDateTime planEndTime;
 }

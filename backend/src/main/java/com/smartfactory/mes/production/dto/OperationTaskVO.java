@@ -38,6 +38,8 @@ public class OperationTaskVO {
     private BigDecimal standardMinutes;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
+    private LocalDateTime planStartTime;
+    private LocalDateTime planEndTime;
     private LocalDateTime createdAt;
 
     public static OperationTaskVO of(MesOperationTask entity) {
@@ -62,6 +64,8 @@ public class OperationTaskVO {
         vo.setStandardMinutes(entity.getStandardMinutes());
         vo.setStartTime(entity.getStartTime());
         vo.setEndTime(entity.getEndTime());
+        vo.setPlanStartTime(entity.getPlanStartTime());
+        vo.setPlanEndTime(entity.getPlanEndTime());
         vo.setCreatedAt(entity.getCreatedAt());
         return vo;
     }
