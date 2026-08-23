@@ -27,6 +27,24 @@ ai:
     # flash 快档轻任务 1500 够用；pro 是推理模型，reasoning 会吃预算，给 8000（实测推理 3k + 回答 1.4k）
     max-tokens-fast: 1500
     max-tokens-pro: 8000
+  # 向量 RAG（第 7 周）：embedding 与 qdrant 复用本机 Docker 容器（尚硅谷课程栈），
+  # 手写 HTTP 客户端零新依赖；两服务不可用时召回自动退化关键词通道（除 reindex 外全部降级）
+  embedding:
+    base-url: http://localhost:8081
+    timeout-seconds: 30
+    # TEI bge-large-zh-v1.5 上限 512 token（约 400 汉字），切块硬上限 400 字/40 重叠防 422
+    max-chunk-chars: 400
+  qdrant:
+    base-url: http://localhost:6333
+    collection: mes-knowledge-sections
+    timeout-seconds: 15
+  knowledge:
+    recall:
+      # 双路召回合并：RRF(k) 融合关键词/向量排名，top-sections 段拼上下文
+      top-sections: 3
+      vector-limit: 8
+      vector-threshold: 0.30
+      rrf-k: 60
 
 spring:
   application:

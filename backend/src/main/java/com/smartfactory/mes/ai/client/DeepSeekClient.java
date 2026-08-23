@@ -2,6 +2,7 @@ package com.smartfactory.mes.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartfactory.mes.ai.dto.StreamChunk;
 import com.smartfactory.mes.ai.exception.AiServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,8 +12,12 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * DeepSeek 大模型客户端（OpenAI 兼容 chat/completions 协议，参考尚硅谷掌柜问数接入方式）
@@ -71,6 +76,16 @@ public class DeepSeekClient {
         return chat(proModel, systemPrompt, userPrompt, maxProTokens);
     }
 
+    /** 快档流式调用（flash）：delta 逐块回调，SSE 打字机用 */
+    public void chatFastStream(String systemPrompt, String userPrompt, Consumer<StreamChunk> onChunk) {
+        chatStream(fastModel, systemPrompt, userPrompt, maxFastTokens, onChunk);
+    }
+
+    /** 强档流式调用（pro）：delta 逐块回调，SSE 打字机用 */
+    public void chatProStream(String systemPrompt, String userPrompt, Consumer<StreamChunk> onChunk) {
+        chatStream(proModel, systemPrompt, userPrompt, maxProTokens, onChunk);
+    }
+
     private String chat(String model, String systemPrompt, String userPrompt, int tokens) {
         if (apiKey == null || apiKey.isBlank()) {
             throw new AiServiceException("DeepSeek API Key 未配置（application-local.yml / DEEPSEEK_API_KEY）");
@@ -105,6 +120,66 @@ public class DeepSeekClient {
             throw e;
         } catch (Exception e) {
             throw new AiServiceException("DeepSeek 调用失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 流式调用：stream=true，同步逐行读取 SSE 响应，delta.content 逐块回调。
+     *
+     * <p>实现要点：RestClient.exchange 在回调里拿到原始 InputStream 手动读行——
+     * 不依赖响应体整体解析，token 一到即可推给前端（打字机）。
+     * 回调抛出的运行时异常（如客户端断开导致 sink send 失败）会中止读取并向上传播。</p>
+     */
+    private void chatStream(String model, String systemPrompt, String userPrompt, int tokens,
+                            Consumer<StreamChunk> onChunk) {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new AiServiceException("DeepSeek API Key 未配置（application-local.yml / DEEPSEEK_API_KEY）");
+        }
+        try {
+            Map<String, Object> body = Map.of(
+                    "model", model,
+                    "messages", List.of(
+                            Map.of("role", "system", "content", systemPrompt),
+                            Map.of("role", "user", "content", userPrompt)),
+                    "max_tokens", tokens,
+                    "stream", true);
+            Void unused = restClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .body(body)
+                    .exchange((request, response) -> {
+                        if (response.getStatusCode().isError()) {
+                            String errBody = new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                            throw new AiServiceException("DeepSeek 流式调用失败: HTTP "
+                                    + response.getStatusCode().value() + " " + errBody);
+                        }
+                        try (BufferedReader reader = new BufferedReader(
+                                new InputStreamReader(response.getBody(), StandardCharsets.UTF_8))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                if (!line.startsWith("data:")) {
+                                    continue;
+                                }
+                                String data = line.substring(5).trim();
+                                if (data.isEmpty() || "[DONE]".equals(data)) {
+                                    continue;
+                                }
+                                JsonNode node = objectMapper.readTree(data);
+                                JsonNode content = node.path("choices").path(0).path("delta").path("content");
+                                if (content.isMissingNode() || content.asText().isEmpty()) {
+                                    // 跳过 role/reasoning_content 等非内容分块
+                                    continue;
+                                }
+                                onChunk.accept(new StreamChunk(content.asText()));
+                            }
+                        }
+                        return null;
+                    });
+        } catch (AiServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AiServiceException("DeepSeek 流式调用失败: " + e.getMessage(), e);
         }
     }
 }
