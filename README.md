@@ -106,12 +106,15 @@ AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助�
 12. **异常建议助手**：下拉选异常单 → 生成处理建议（pro 深度推理约 5~20s）→ 保存回写异常单
     ai_suggestion 并留 AI_SUGGEST 追溯（保存按钮仅 admin/qa 可见）
 13. **生产日报助手**：选日期 → 聚合当日产量/良率/工单/异常/设备 → LLM 润色 → 编辑保存（同日幂等覆盖）→ 历史列表
+14. **ERP 订单（系统集成）**：planning 登录 → 模拟下单（外部订单 PENDING）→ admin 一键转工单（自动生成生产工单并回填关联）→ 工单按正常流程生产
+15. **WMS 库存（系统集成）**：planning 对 ERP 推单工单领料（按 BOM 关键物料自动计算用量）→ 未领料开工被 409 拦截 → 13 道报满后外部订单自动 DONE + 合格品自动成品入库（流水可查）
+16. **动态菜单（角色差异）**：admin/planning 侧边栏多出「系统集成」目录（ERP 订单 + WMS 库存），operator/qa 登录看不到——同一套代码按登录人菜单树渲染；刷新不丢、退出换账号不残留旧路由
 
 ### 冒烟测试
 
 ```bash
 # 后端启动后执行（Node 18+ 内置 fetch，无需安装依赖）
-# 139 项断言：第 1/2/3 周回归 + AI 应用（知识库问答/异常建议/日报/四意图对话/权限边界）
+# 162 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）
 node scripts/smoke.mjs
 
 # 冒烟数据一键清理回种子状态（Git Bash）
@@ -126,6 +129,7 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 |---|---|---|---|
 | 认证 | POST | `/api/auth/login` | 真实登录，返回 token + 用户信息 + 角色 + 权限集合 |
 | 认证 | GET | `/api/auth/users` | 用户下拉（密码不泄露） |
+| 认证 | GET | `/api/auth/menus` | 当前用户菜单树（前端动态路由数据源，SUPER_ADMIN 全量） |
 | 产品 | GET | `/api/master/products/page` | 分页（keyword/status） |
 | 产品 | GET/POST/PUT/DELETE | `/api/master/products/{id}` | 详情/创建/修改/逻辑删除 |
 | 产品 | PUT | `/api/master/products/{id}/status` | 启停用（存在生效 BOM/路线时禁停用） |
@@ -175,6 +179,13 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | 日报 | GET | `/api/ai/daily/page` | 日报历史分页 |
 | 日报 | POST | `/api/ai/daily/preview` | 聚合当日数据 + LLM 润色生成草稿 |
 | 日报 | POST | `/api/ai/daily/save` | 保存（同日幂等覆盖） |
+| ERP | GET | `/api/integration/erp/orders/page`、`/{id}` | 外部订单分页/详情 |
+| ERP | POST | `/api/integration/erp/orders` | 模拟下单（PENDING，ERP 单号 UNIQUE） |
+| ERP | PUT | `/api/integration/erp/orders/{id}/to-work-order` | 一键转工单（CAS 防重，SYNCED + 回填工单 ID） |
+| WMS | GET | `/api/integration/wms/inventory/page` | 库存分页（itemType/keyword，物料/成品名称回填） |
+| WMS | GET | `/api/integration/wms/transactions/page` | 库存流水分页（workOrderId/itemType/bizType） |
+| WMS | POST | `/api/integration/wms/stock-in` | 采购入库（ON DUPLICATE KEY 累加 + 流水） |
+| WMS | POST | `/api/integration/wms/pick` | 工单领料（BOM 关键物料 × 计划数，幂等：已足额领用 409） |
 
 ## 技术决策记录
 
@@ -221,14 +232,27 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
     LLM 生成带引用；规模上来只需替换召回通道（向量库），管线结构不变。
 23. **AI 降级兜底永不白屏**：LLM 失败/超时/空内容一律模板回答 + `fallback=true` 前端明示——
     AI 是增强不是依赖；AI Key 只存 gitignored `application-local.yml`，仓库内环境变量占位。
+24. **ERP 转工单 CAS 翻转**：`WHERE id=? AND status='PENDING'` 更新 0 行即并发重复转单 → 抛异常
+    回滚刚创建的工单（先建工单再翻转状态，失败即全回滚，不留孤儿工单）。
+25. **集成钩子 REQUIRES_NEW + 静默降级**：开工校验/完工回传钩子以独立事务执行且异常吞掉只告警——
+    "集成失败不阻断生产"；工单是否 ERP 来源统一判 `EXISTS(mes_external_order WHERE work_order_id=?)`，
+    手建工单即使手填外部单号也不触发（老冒烟链路零影响）。
+26. **完工钩子流水号在主事务预取**：REQUIRES_NEW 子事务内再取 mes_sequence 号会与报工主事务竞争
+    序列行锁（实测锁等待超时），故 STK 号在外层先取好传入。
+27. **库存并发靠单行原子 SQL**：累加用 `ON DUPLICATE KEY UPDATE qty=qty+VALUES(qty)`，
+    扣减用 `WHERE qty>=?` 条件 UPDATE，全程无"先读后写"丢失更新窗口。
+28. **前端动态路由 = 后端菜单树驱动**：登录后拉 `/auth/menus`，组件按
+    `import.meta.glob` 路径约定反查（/products → views/products/index.vue，新页面零注册）；
+    菜单接口失败降级本地静态树（不白屏）；退出/401 时 removeRoute 防换账号残留旧路由。
 
 ## 开发进度
 
-> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md)
+> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md)
 > 另有 [10 步演示脚本](docs/demo-script.md) 与 [简历项目描述](docs/resume.md)。
 
 - [x] 第 1 周：工程骨架 + 基础资料（产品/物料/BOM/工艺路线/工序/工位）+ 电视 Demo 大屏
 - [x] 第 2 周：生产执行（工单/下发/工序任务/派工/报工）+ 真实登录权限（JWT/RBAC）
 - [x] 第 3 周：质量追溯看板（质检任务/检验录入/不良/异常 + SN/批次追溯 + 设备漂移模拟 + ECharts 大屏）
 - [x] 第 4 周：AI 应用与项目包装（DeepSeek 双档接入 + 知识库 RAG + 异常建议 + 生产日报 + 统一 AI 助手）
-- [ ] 第 5 周（可选）：ERP/WMS 模拟集成、前端动态路由、物料追溯、生产排程、AI 回答 SSE 流式
+- [x] 第 5 周：系统集成（ERP 模拟下单一键转工单 / WMS 采购入库与工单领料 / 前端动态路由菜单树驱动）
+- [ ] 第 6 周（可选）：物料追溯、生产排程、AI 回答 SSE 流式

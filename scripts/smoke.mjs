@@ -2,7 +2,8 @@
 // 第 4 周版：真实登录（JWT）→ 第 1/2 周断言回归（基础资料/生产执行/BOM升版）
 //   → 第 3 周质量链路（质检任务/检验录入/不良/异常）+ SN 追溯 + 批次追溯 + 生产看板
 //   → 第 4 周 AI（知识库 RAG/统一助手四意图/异常建议/生产日报 + 权限边界）
-// 前置条件：干净库重放 00→08 后运行（种子产品 3 条等断言依赖干净状态）
+//   → 第 5 周系统集成（ERP 外单 5 台全链 + WMS 领料/成品入库 + 菜单树角色差异）
+// 前置条件：干净库重放 00→10 后运行（种子产品 3 条等断言依赖干净状态）
 // 运行后清理：Git Bash 执行 scripts/clean-smoke.sql 回到种子状态
 const BASE = 'http://localhost:8080/api';
 let pass = 0, fail = 0;
@@ -623,6 +624,112 @@ let taskIds = [];
   check('operator 知识库查询 200 / 助手 200 / 文档写 403',
     od.status === 200 && oc.status === 200 && ow.status === 403,
     `page=${od.status} chat=${oc.status} write=${ow.status}`);
+}
+
+// ------------------------------------------------------------
+// 17. 第 5 周系统集成：ERP 外单 5 台全链（下单→转工单→领料→开工→报工→完工回传+成品入库）
+// ------------------------------------------------------------
+let extWoId = null;
+let extTaskIds = [];
+{
+  // 17.1 planning 模拟下单 → PENDING（外部订单号 ERP+日期+4位流水）
+  const o1 = await req('POST', '/integration/erp/orders',
+    { productId: 1, planQty: 5, priority: 'HIGH', remark: '冒烟集成链路' }, PLANNING_TOKEN);
+  check('planning 模拟下单 200', o1.status === 200 && o1.json?.code === 0,
+    JSON.stringify(o1.json)?.slice(0, 150));
+  const extOrderId = o1.json?.data;
+  const o1b = (await req('GET', `/integration/erp/orders/${extOrderId}`, null, PLANNING_TOKEN)).json?.data;
+  check('外部订单号 ERP+日期+4位流水 且 PENDING',
+    /^ERP\d{12}$/.test(o1b?.externalOrderNo ?? '') && o1b?.status === 'PENDING',
+    JSON.stringify({ externalOrderNo: o1b?.externalOrderNo, status: o1b?.status }));
+
+  // 17.2 权限边界：operator 下单/转工单 403
+  const o2 = await req('POST', '/integration/erp/orders', { productId: 1, planQty: 1 }, OPERATOR_TOKEN);
+  check('operator 模拟下单 -> 403', o2.status === 403, `status=${o2.status}`);
+  const o3 = await req('PUT', `/integration/erp/orders/${extOrderId}/to-work-order`, {}, OPERATOR_TOKEN);
+  check('operator 转工单 -> 403', o3.status === 403, `status=${o3.status}`);
+
+  // 17.3 admin 转工单 → SYNCED + 工单透传外单号/数量/优先级
+  const o4 = await req('PUT', `/integration/erp/orders/${extOrderId}/to-work-order`, {}, ADMIN_TOKEN);
+  check('admin 转工单 200', o4.status === 200 && o4.json?.code === 0,
+    JSON.stringify(o4.json)?.slice(0, 150));
+  const o4b = (await req('GET', `/integration/erp/orders/${extOrderId}`, null, PLANNING_TOKEN)).json?.data;
+  extWoId = o4b?.workOrderId;
+  check('外部订单 SYNCED + 关联工单回填', o4b?.status === 'SYNCED' && !!extWoId,
+    JSON.stringify({ status: o4b?.status, workOrderId: extWoId }));
+  const extWo = (await req('GET', `/production/work-orders/${extWoId}`)).json?.data;
+  check('转单工单透传 externalOrderNo + 计划 5 台 + 优先级 HIGH',
+    extWo?.externalOrderNo === o4b?.externalOrderNo && extWo?.planQty === 5 && extWo?.priority === 'HIGH',
+    JSON.stringify({ externalOrderNo: extWo?.externalOrderNo, planQty: extWo?.planQty, priority: extWo?.priority }));
+
+  // 17.4 下发 → 未领料开工 409 → 领料（关键物料 ×5）→ 重复领料 409
+  const o5 = await req('POST', `/production/work-orders/${extWoId}/release`, {}, ADMIN_TOKEN);
+  check('外单工单下发 200', o5.json?.code === 0, JSON.stringify(o5.json)?.slice(0, 150));
+  const extDetail = (await req('GET', `/production/work-orders/${extWoId}`)).json?.data;
+  extTaskIds = (extDetail?.tasks ?? []).map(t => t.id);
+  check('外单工单 13 个任务', extTaskIds.length === 13, `got ${extTaskIds.length}`);
+  await req('PUT', `/production/tasks/${extTaskIds[0]}/assign`, { operatorId: 2 });
+  const o6 = await req('PUT', `/production/tasks/${extTaskIds[0]}/start`, {});
+  check('ERP 推单工单未领料开工 -> 409', o6.status === 409, `status=${o6.status}`);
+  const o7 = await req('POST', '/integration/wms/pick', { workOrderId: extWoId }, PLANNING_TOKEN);
+  check('planning 工单领料 200', o7.status === 200 && o7.json?.code === 0,
+    JSON.stringify(o7.json)?.slice(0, 200));
+  const pickItems = o7.json?.data?.items ?? [];
+  check('领料明细只含关键物料（1/2/3/4/5/20）且应领 = 用量×5',
+    pickItems.length > 0 && pickItems.every(i =>
+      ['1', '2', '3', '4', '5', '20'].includes(String(i.materialId)) && i.needQty % 5 === 0),
+    JSON.stringify(pickItems.map(i => `${i.materialCode}:${i.needQty}`)));
+  const o8 = await req('POST', '/integration/wms/pick', { workOrderId: extWoId }, PLANNING_TOKEN);
+  check('重复领料 -> 409（已足额领用）', o8.status === 409, `status=${o8.status}`);
+
+  // 17.5 领料后开工放行 → 其余任务派工+开工 → 13 道报工 5 台
+  const o9 = await req('PUT', `/production/tasks/${extTaskIds[0]}/start`, {});
+  check('领料后开工 200（钩子放行）', o9.json?.code === 0, JSON.stringify(o9.json)?.slice(0, 150));
+  let ok1 = true;
+  for (let i = 1; i < 13; i++) {
+    const a = await req('PUT', `/production/tasks/${extTaskIds[i]}/assign`, { operatorId: 2 });
+    const s = await req('PUT', `/production/tasks/${extTaskIds[i]}/start`, {});
+    if (a.json?.code !== 0 || s.json?.code !== 0) { ok1 = false; break; }
+  }
+  check('t2..t13 派工+开工成功（领料钩子全部放行）', ok1, 'chain failed');
+  let ok2 = true;
+  for (let i = 0; i < 13; i++) {
+    const rp = await req('POST', '/production/reports',
+      { taskId: extTaskIds[i], reportQty: 5, goodQty: 5, defectQty: 0 }, OPERATOR_TOKEN);
+    if (rp.json?.code !== 0) { ok2 = false; break; }
+  }
+  check('13 道报工 5 台成功（operator）', ok2, 'report loop failed');
+  const extWoDone = (await req('GET', `/production/work-orders/${extWoId}`)).json?.data;
+  check('外单工单 COMPLETED 5/5', extWoDone?.status === 'COMPLETED' && extWoDone?.goodQty === 5,
+    JSON.stringify({ status: extWoDone?.status, goodQty: extWoDone?.goodQty }));
+
+  // 17.6 完工钩子：外部订单 DONE + 成品入库 +5 + FINISHED_IN 流水 + 追溯 2 条
+  const oDone = (await req('GET', `/integration/erp/orders/${extOrderId}`, null, PLANNING_TOKEN)).json?.data;
+  check('完工钩子：外部订单 DONE', oDone?.status === 'DONE', `status=${oDone?.status}`);
+  const inv = await req('GET', '/integration/wms/inventory/page?pageNum=1&pageSize=100&itemType=FINISHED',
+    null, PLANNING_TOKEN);
+  const finRow = (inv.json?.data?.records ?? []).find(r => String(r.itemRefId) === '1');
+  check('完工钩子：成品库存 +5（产品 1）', finRow?.qty === 5, `qty=${finRow?.qty}`);
+  const txp = await req('GET', `/integration/wms/transactions/page?pageNum=1&pageSize=50&workOrderId=${extWoId}&bizType=FINISHED_IN`,
+    null, PLANNING_TOKEN);
+  check('完工钩子：FINISHED_IN 流水 1 条', String(txp.json?.data?.total) === '1',
+    `total=${txp.json?.data?.total}`);
+  const extTraces = (await req('GET', `/production/traces?workOrderId=${extWoId}`)).json?.data ?? [];
+  const extCount = {};
+  for (const t of extTraces) extCount[t.actionType] = (extCount[t.actionType] ?? 0) + 1;
+  check('ERP 工单追溯含 ERP_DONE=1 / WMS_FINISHED_IN=1',
+    extCount.ERP_DONE === 1 && extCount.WMS_FINISHED_IN === 1, JSON.stringify(extCount));
+
+  // 17.7 菜单树角色差异（动态路由数据源回归）：operator 无集成菜单、planning 有
+  const walk = (ns, out) => { for (const n of ns ?? []) { if (n.path) out.push(n.path); walk(n.children, out); } return out; };
+  const m1 = await req('GET', '/auth/menus', null, OPERATOR_TOKEN);
+  const m1paths = walk(m1.json?.data ?? [], []);
+  check('operator 菜单树无 /erp-orders /inventory',
+    !m1paths.includes('/erp-orders') && !m1paths.includes('/inventory'), m1paths.join(','));
+  const m2 = await req('GET', '/auth/menus', null, PLANNING_TOKEN);
+  const m2paths = walk(m2.json?.data ?? [], []);
+  check('planning 菜单树含 /erp-orders /inventory',
+    m2paths.includes('/erp-orders') && m2paths.includes('/inventory'), m2paths.join(','));
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
