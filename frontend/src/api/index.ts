@@ -5,6 +5,10 @@ import type {
   Bom,
   BomQuery,
   BomSave,
+  DashboardEquipment,
+  DashboardQuality,
+  DashboardSummary,
+  DashboardWorkOrderItem,
   DefectQuery,
   DefectRecord,
   Equipment,
@@ -160,6 +164,14 @@ export const routeApi = {
   changeStatus: (id: string, status: string) =>
     httpPut<void>(`/master/routes/${id}/status`, { status }),
   remove: (id: string) => httpDelete<void>(`/master/routes/${id}`),
+}
+
+// ---------- 生产看板（第 3 周） ----------
+export const dashboardApi = {
+  summary: () => httpGet<DashboardSummary>('/dashboard/summary'),
+  workOrders: () => httpGet<DashboardWorkOrderItem[]>('/dashboard/work-orders'),
+  quality: () => httpGet<DashboardQuality>('/dashboard/quality'),
+  equipment: () => httpGet<DashboardEquipment>('/dashboard/equipment'),
 }
 
 // ---------- 设备（第 3 周） ----------

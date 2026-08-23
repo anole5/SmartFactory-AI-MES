@@ -60,6 +60,9 @@
         <el-menu-item index="/traces">
           <el-icon><Search /></el-icon><span>追溯查询</span>
         </el-menu-item>
+        <el-menu-item index="/dashboard">
+          <el-icon><DataAnalysis /></el-icon><span>生产看板</span>
+        </el-menu-item>
         <el-menu-item index="/tv-demo">
           <el-icon><VideoPlay /></el-icon><span>电视 Demo</span>
         </el-menu-item>

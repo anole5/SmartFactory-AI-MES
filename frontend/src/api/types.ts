@@ -563,3 +563,63 @@ export interface BatchTrace {
   reports: WorkReport[]
   workOrders: WorkOrder[]
 }
+
+// ---------- 生产看板（第 3 周） ----------
+/** 状态计数（设备分布，Long 序列化为字符串） */
+export interface StatusCount {
+  status: string
+  count: string
+}
+
+export interface DashboardSummary {
+  todayOutputQty: string
+  todayReportCount: string
+  todayDefectQty: string
+  /** 今日良率百分比，无数据时 null */
+  todayYieldRate: number | null
+  inProgressWorkOrderCount: string
+  openExceptionCount: string
+  equipmentStatusCounts: StatusCount[]
+}
+
+export interface DashboardWorkOrderItem {
+  id: string
+  workOrderNo: string
+  productCodeSnapshot?: string
+  productNameSnapshot?: string
+  planQty: number
+  completedQty: number
+  status: string
+  progressPercent: number
+}
+
+export interface ProcessYield {
+  processName: string
+  goodQty: string
+  defectQty: string
+  /** 工序良率百分比，无数据时 null */
+  yieldRate: number | null
+}
+
+export interface DefectCount {
+  defectCode: string
+  count: string
+}
+
+export interface DashboardQuality {
+  overallYieldRate: number | null
+  processYields: ProcessYield[]
+  defectDistribution: DefectCount[]
+}
+
+export interface DashboardEquipmentRow {
+  equipmentCode: string
+  equipmentName: string
+  status: string
+  workstationName?: string
+}
+
+export interface DashboardEquipment {
+  equipment: DashboardEquipmentRow[]
+  statusCounts: StatusCount[]
+}

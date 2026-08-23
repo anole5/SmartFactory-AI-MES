@@ -99,6 +99,12 @@ const router = createRouter({
           meta: { title: '追溯查询' },
         },
         {
+          path: 'dashboard',
+          name: 'dashboard',
+          component: () => import('@/views/dashboard/index.vue'),
+          meta: { title: '生产看板' },
+        },
+        {
           path: 'tv-demo',
           name: 'tv-demo',
           component: () => import('@/views/tv-demo/index.vue'),
