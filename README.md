@@ -32,6 +32,8 @@ SmartFactory-AI-MES
 - Maven 3.8+（本地仓库 `D:\mvn-repository`，见 `backend/.mvn/maven.config`，可自行修改）
 - Node.js 18+
 - Docker Desktop（提供 MySQL 8 容器，端口 3306）
+- Qdrant v1.16+（向量库，端口 6333 无鉴权）+ TEI 嵌入服务（端口 8081，模型 bge-large-zh-v1.5
+  1024 维 Cosine）——仅知识库语义问答需要；缺失时 ask 自动退化关键词召回，其余功能不受影响
 
 ### 1. 初始化数据库（一次性）
 
@@ -50,7 +52,12 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/10-seed-week5.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/11-schema-week6.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/12-seed-week6.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/13-schema-week7.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/14-seed-week7.sql
 ```
+
+> 13/14 为第 7 周：报表类型迁移（DAY/WEEK）+ 近 14 天历史工单/报工种子（CURDATE 相对日期，
+> 任意日导入都有效，供 AI 周报趋势/环比演示）。
 
 > 注意：Windows PowerShell 管道会以 GBK 破坏 UTF-8 内容，请在 Git Bash 中执行；
 > 00-init 是幂等建库脚本，如需干净重放请先 `DROP DATABASE smartfactory_mes`。
@@ -68,6 +75,10 @@ AI 功能（知识库问答/异常建议/日报/统一助手）需配置 DeepSee
 复制 `backend/src/main/resources/application-local.yml.example` 为 `application-local.yml` 填入 Key，
 或启动时注入环境变量 `DEEPSEEK_API_KEY`（该文件已 gitignore，真实 Key 绝不入库）。
 未配置 Key 时 AI 接口自动降级模板回答（`fallback=true`），其余功能不受影响。
+
+向量检索另需 Qdrant（6333）与 TEI（8081）在线：缺失时知识库问答自动退化关键词召回，
+`POST /ai/knowledge/reindex` 是唯一会报错的向量端点（真实金丝雀）；`ai.qdrant.*` / `ai.embedding.*`
+配置见 `application.yml`。
 
 ### 3. 启动前端（5173）
 
@@ -121,12 +132,20 @@ AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助�
     下午执行时横道标红（已逾期）属预期
 19. **报表中心**：日/周/月三粒度切换 → 汇总卡片（合格/不良/良率/报工数/工单数/统计窗口）+ 明细表
     （日报按工序分组）→ 导出 Excel（汇总 + 明细双 sheet，中文文件名）
+20. **AI 助手流式打字机（第 7 周）**：聊天页提问后 AI 回答逐字打印（意图标签先行、引用/数据来源
+    收尾回填），生成中可点「停止」按钮断开（不落库）；后端停摆时自动回退一次性渲染不白屏
+21. **知识库语义问答（第 7 周）**：知识库页用大白话提问（如"开机后屏幕全暗，没有任何画面显示"）
+    ——词面零重叠也能命中《黑屏故障排查手册》，引用标签证明向量召回；admin 可点文档页「重建索引」
+    （reindex）全量入 Qdrant
+22. **AI 周报（第 7 周）**：生产日报助手页切「AI 周报」Tab → 选截止日期 → pro 档聚合近两周逐日
+    报工生成趋势分析（种子故事：良率环比 94.1%→98.1%，+4.0 个百分点）→ 编辑保存（同日日报/
+    周报各一条，互不覆盖）
 
 ### 冒烟测试
 
 ```bash
 # 后端启动后执行（Node 18+ 内置 fetch，无需安装依赖）
-# 183 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）+ 第 6 周生产深化（物料批次/排程/报表）
+# 201 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）+ 第 6 周生产深化（物料批次/排程/报表）+ 第 7 周 AI 进阶（SSE 流式/向量 RAG/AI 周报）
 node scripts/smoke.mjs
 
 # 冒烟数据一键清理回种子状态（Git Bash）
@@ -189,16 +208,23 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | 看板 | GET | `/api/dashboard/quality` | 整体良率 + 工序良率 + 不良分布 |
 | 看板 | GET | `/api/dashboard/equipment` | 设备列表 + 状态分布 |
 | AI 助手 | POST | `/api/ai/chat` | 统一对话入口：意图路由（OVERVIEW/KNOWLEDGE/EXCEPTION/REPORT）→ 分发四类处理 |
+| AI 助手 | POST | `/api/ai/chat/stream` | 流式对话（SSE `meta→delta*→done`，逐 token 打字机；断开连接=停止） |
 | 知识库 | GET | `/api/ai/knowledge/docs/page`、`/{id}` | 文档分页（keyword/docType/status）/详情 |
-| 知识库 | POST/PUT | `/api/ai/knowledge/docs` | 新建/编辑文档（仅 admin） |
-| 知识库 | POST | `/api/ai/knowledge/ask` | SOP 问答（关键词召回 + 段落切分 + LLM 生成带引用） |
+| 知识库 | POST/PUT | `/api/ai/knowledge/docs` | 新建/编辑文档（仅 admin，写路径自动同步向量点） |
+| 知识库 | POST | `/api/ai/knowledge/ask` | SOP 问答（双路召回：关键词打分 + 向量 RRF 合并 + LLM 生成带引用） |
+| 知识库 | POST | `/api/ai/knowledge/ask/stream` | 流式 SOP 问答（同 ask 双路召回） |
+| 知识库 | POST | `/api/ai/knowledge/reindex` | 重建向量索引（全量 ENABLED 文档入 Qdrant，幂等；仅 admin） |
 | 知识库 | PUT | `/api/ai/knowledge/qa-records/{id}/feedback` | 回答有用/无用反馈 |
 | 异常建议 | POST | `/api/ai/assistant/suggest` | 生成处理建议（pro 档推理 + FAULT_GUIDE 召回） |
+| 异常建议 | POST | `/api/ai/assistant/suggest/stream` | 流式处理建议（pro 推理逐 token） |
 | 异常建议 | POST | `/api/ai/assistant/save` | 保存建议回写异常单 + AI_SUGGEST 追溯（admin/qa） |
 | 异常建议 | GET | `/api/ai/assistant/suggestion/{exceptionId}` | 回显已保存建议 |
-| 日报 | GET | `/api/ai/daily/page` | 日报历史分页 |
+| 日报 | GET | `/api/ai/daily/page` | 历史分页（reportType=DAY/WEEK，不传默认 DAY——向后兼容） |
 | 日报 | POST | `/api/ai/daily/preview` | 聚合当日数据 + LLM 润色生成草稿 |
+| 日报 | POST | `/api/ai/daily/preview/stream` | 流式日报预览 |
 | 日报 | POST | `/api/ai/daily/save` | 保存（同日幂等覆盖） |
+| 周报 | POST | `/api/ai/weekly/preview` | 周报预览（近两周逐日聚合 + 趋势摘要环比 + pro 档生成，不流式） |
+| 周报 | POST | `/api/ai/weekly/save` | 保存周报（同截止日期幂等覆盖，复用 ai:daily:save 权限） |
 | ERP | GET | `/api/integration/erp/orders/page`、`/{id}` | 外部订单分页/详情 |
 | ERP | POST | `/api/integration/erp/orders` | 模拟下单（PENDING，ERP 单号 UNIQUE） |
 | ERP | PUT | `/api/integration/erp/orders/{id}/to-work-order` | 一键转工单（CAS 防重，SYNCED + 回填工单 ID） |
@@ -281,10 +307,29 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
     绕开解包拦截器——Blob 会被 JSON 拦截器误解析。
 34. **报表聚合口径统一 created_at**：mes_work_report 无 report_time 列，与 DashboardMapper
     `DATE(created_at)=CURDATE()` 口径一致；区间左闭右开 `created_at >= start AND < end`。
+35. **SSE 用 SseEmitter 而非 WebFlux**：项目是 Spring MVC，四类流式端点返回裸 SseEmitter(120s)
+    （不包 ApiResult 的文档化例外）；LLM 流由 RestClient.exchange 回调内同步读 InputStream 逐行
+    解析 `data:` 行，token 一到即推前端。
+36. **停止按钮 = 断开连接即取消**：SseEmitterSink 持 cancelled 标志（onCompletion/onTimeout/send
+    异常置位），sendDelta 抛 StreamCancelledException 中止 LLM 读取；流式取消不落库、不落日志
+    （正常用户行为）。
+37. **推理中间分块 content 为 null**：pro 档推理期间 delta.content 是 JSON null，asText() 会返回
+    字符串 "null"，必须显式 isNull() 过滤——否则打字机输出满屏 null。
+38. **Qdrant 接入手写 HTTP 客户端**：零新 pom 依赖（与自研 DeepSeekClient 同风格）；点 id =
+    UUID.nameUUIDFromBytes("docId#idx")，索引与召回共用切块器保证 id 对齐；批量 100 upsert、
+    search limit 8 + score_threshold 0.30；超长段落硬切 400 字/40 重叠防 TEI 512 token 上限。
+39. **双路召回 RRF(k=60) 合并**：关键词通道（确定性、快）+ 向量通道（语义、慢）按 (docId,idx)
+    对齐排名打分合并取 top3，引用从合并段落派生（向量命中的文档也进引用）；向量通道异常
+    （Qdrant/TEI 宕机）自动退化纯关键词，reindex 是唯一"真实金丝雀"。
+40. **写路径向量同步只告警不阻断**：create/update 事务内先删后 embed+upsert，失败仅告警
+    （文档 CRUD 不受影响，reindex 可修复）；DISABLED 文档删除向量点。
+41. **周报窗口口径 D-7..D-1 vs D-14..D-8**：种子不种今天（今天的报工留给冒烟），本周窗口取
+    截止日前 7 个完整自然日，与 14-seed 注释的演示故事（良率 94.1%→98.1%）对齐；日报/周报
+    以 (report_date, report_type) 唯一键并存，page 默认 reportType=DAY 保证旧调用零影响。
 
 ## 开发进度
 
-> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md) · [第 6 周完成报告](docs/week6-report.md)
+> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md) · [第 6 周完成报告](docs/week6-report.md) · [第 7 周完成报告](docs/week7-report.md)
 > 另有 [10 步演示脚本](docs/demo-script.md) 与 [简历项目描述](docs/resume.md)。
 
 - [x] 第 1 周：工程骨架 + 基础资料（产品/物料/BOM/工艺路线/工序/工位）+ 电视 Demo 大屏
@@ -293,4 +338,4 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 - [x] 第 4 周：AI 应用与项目包装（DeepSeek 双档接入 + 知识库 RAG + 异常建议 + 生产日报 + 统一 AI 助手）
 - [x] 第 5 周：系统集成（ERP 模拟下单一键转工单 / WMS 采购入库与工单领料 / 前端动态路由菜单树驱动）
 - [x] 第 6 周：生产深化（物料批次追溯正反闭环 / 生产排程甘特图 / 报表中心三粒度 + Excel 导出）
-- [ ] 第 7 周（可选）：AI 回答 SSE 流式 / 向量 RAG 升级
+- [x] 第 7 周（AI 进阶）：SSE 流式输出（打字机 + 停止按钮）/ 向量 RAG 双路召回（语义问答命中）/ AI 周报（趋势 + 环比）

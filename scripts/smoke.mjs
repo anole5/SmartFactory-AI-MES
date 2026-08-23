@@ -4,6 +4,7 @@
 //   → 第 4 周 AI（知识库 RAG/统一助手四意图/异常建议/生产日报 + 权限边界）
 //   → 第 5 周系统集成（ERP 外单 5 台全链 + WMS 领料/成品入库 + 菜单树角色差异）
 //   → 第 6 周生产深化（物料批次追溯 + 生产排程甘特图 + 报表中心）
+//   → 第 7 周 AI 进阶（SSE 流式四端点事件契约 + 向量 RAG reindex/语义召回 + AI 周报趋势/环比/类型隔离）
 // 前置条件：干净库重放 00→12 后运行（种子产品 3 条等断言依赖干净状态）
 // 运行后清理：Git Bash 执行 scripts/clean-smoke.sql 回到种子状态
 const BASE = 'http://localhost:8080/api';
@@ -855,6 +856,139 @@ let schedWoId = null;
   const c1 = await req('PUT', `/production/work-orders/${schedWoId}/cancel`, {}, PLANNING_TOKEN);
   check('取消排程验证工单 200', c1.status === 200 && c1.json?.code === 0,
     JSON.stringify(c1.json)?.slice(0, 150));
+}
+
+// ------------------------------------------------------------
+// 19. 第 7 周 AI 进阶：SSE 流式（四端点事件契约）+ 向量 RAG（reindex/语义召回）+ AI 周报（趋势/环比/类型隔离）
+// ------------------------------------------------------------
+{
+  // SSE 行解析（与前端 sse.ts 同款语义：\n\n 分块 → event:/data: 行 → meta/delta/done/error）
+  async function sse(path, body, token) {
+    const res = await fetch(BASE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 200) return { status: res.status, metas: [], deltas: [], done: null, errors: [] };
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    const metas = [], deltas = [], errors = [];
+    let done = null;
+    while (true) {
+      const { value, done: rd } = await reader.read();
+      if (rd) break;
+      buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        let ev = '';
+        let data = '';
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        let parsed = null;
+        try { parsed = JSON.parse(data); } catch { continue; }
+        if (ev === 'meta') metas.push(parsed);
+        else if (ev === 'delta') deltas.push(String(parsed.content ?? ''));
+        else if (ev === 'done') done = parsed;
+        else if (ev === 'error') errors.push(parsed.message);
+      }
+    }
+    return { status: res.status, metas, deltas, done, errors };
+  }
+
+  // 19.1 统一助手流式：meta 先行 intent=REPORT → delta 逐块 → done（answer===delta 拼接，recordId 落库）
+  const s1 = await sse('/ai/chat/stream', { question: '生成今天的生产日报' }, OPERATOR_TOKEN);
+  check('助手流式 200 且 meta 先行 intent=REPORT', s1.status === 200 && s1.metas[0]?.intent === 'REPORT',
+    `status=${s1.status} meta=${JSON.stringify(s1.metas[0])}`);
+  check('助手流式 delta>0 且 done.answer===delta 拼接且 recordId 存在',
+    s1.deltas.length > 0 && s1.errors.length === 0 && s1.done?.answer === s1.deltas.join('') && !!s1.done?.recordId,
+    `deltas=${s1.deltas.length} err=${JSON.stringify(s1.errors)}`);
+
+  // 19.2 知识库流式：meta=KNOWLEDGE + 引用非空 + 契约完整
+  const s2 = await sse('/ai/knowledge/ask/stream', { question: '烧录时报 BURN_FAIL 怎么处理？' }, OPERATOR_TOKEN);
+  check('知识库流式 meta=KNOWLEDGE 且引用含烧录',
+    s2.status === 200 && s2.metas[0]?.intent === 'KNOWLEDGE'
+      && (s2.done?.references ?? []).some(r => r.docName?.includes('烧录')),
+    `refs=${JSON.stringify(s2.done?.references?.map(r => r.docName))}`);
+  check('知识库流式 done.answer===delta 拼接', s2.done?.answer === s2.deltas.join(''),
+    `joined=${s2.deltas.join('').length} answer=${s2.done?.answer?.length}`);
+
+  // 19.3 异常建议流式：qa 建异常单 → meta=EXCEPTION+exceptionId → done.exceptionNo
+  const ex = await req('POST', '/quality/exceptions',
+    { defectCode: 'FLOWER_SCREEN', description: '冒烟 19 节：流式建议验证' }, QA_TOKEN);
+  const exceptionId = ex.json?.data;
+  check('qa 创建异常单 200（流式建议用）', ex.status === 200 && !!exceptionId, `id=${exceptionId}`);
+  const s3 = await sse('/ai/assistant/suggest/stream', { exceptionId }, QA_TOKEN);
+  check('建议流式 meta=EXCEPTION 且 done.exceptionNo 存在',
+    s3.status === 200 && s3.metas[0]?.intent === 'EXCEPTION' && !!s3.done?.exceptionNo,
+    `meta=${JSON.stringify(s3.metas[0])} exceptionNo=${s3.done?.exceptionNo}`);
+
+  // 19.4 日报流式：meta=REPORT+reportDate → done.summary 非空 + 契约完整
+  const today = new Date().toISOString().slice(0, 10);
+  const s4 = await sse('/ai/daily/preview/stream', { reportDate: today }, OPERATOR_TOKEN);
+  check('日报流式 meta=REPORT 且 done.summary 非空',
+    s4.status === 200 && s4.metas[0]?.intent === 'REPORT' && String(s4.done?.summary ?? '').length > 20,
+    `summaryLen=${s4.done?.summary?.length}`);
+  check('日报流式 done.answer===delta 拼接', s4.done?.answer === s4.deltas.join(''),
+    `joined=${s4.deltas.join('').length} answer=${s4.done?.answer?.length}`);
+
+  // 19.5 向量重建索引：admin 200 {docCount:4} / operator 403（权限边界）
+  const r1 = await req('POST', '/ai/knowledge/reindex', {}, ADMIN_TOKEN);
+  check('reindex 200 且 docCount=4（种子全量入库）',
+    r1.status === 200 && r1.json?.data?.docCount === 4 && r1.json?.data?.sectionCount >= 4,
+    JSON.stringify(r1.json?.data));
+  const r2 = await req('POST', '/ai/knowledge/reindex', {}, OPERATOR_TOKEN);
+  check('operator reindex -> 403', r2.status === 403, `status=${r2.status}`);
+
+  // 19.6 双路召回：语义问法（词面零重叠）向量命中 + 关键词问法排序保持
+  const p1 = await req('POST', '/ai/knowledge/ask', { question: '开机后屏幕全暗，没有任何画面显示' }, OPERATOR_TOKEN);
+  check('语义问法（词面零重叠）命中黑屏文档且非降级',
+    p1.status === 200 && p1.json?.data?.fallback === false
+      && (p1.json?.data?.references ?? []).some(x => x.docName?.includes('黑屏')),
+    `refs=${JSON.stringify(p1.json?.data?.references?.map(x => x.docName))}`);
+  const p2 = await req('POST', '/ai/knowledge/ask', { question: '烧录失败怎么处理' }, OPERATOR_TOKEN);
+  const p2Refs = p2.json?.data?.references ?? [];
+  check('关键词问法 references[0] 仍为烧录文档（排序保持）',
+    p2Refs.length > 0 && p2Refs[0]?.docName?.includes('烧录'),
+    `refs=${JSON.stringify(p2Refs.map(x => x.docName))}`);
+
+  // 19.7 AI 周报预览：pro 档趋势生成 + 环比摘要 + 7 行逐日数据
+  const w1 = await req('POST', '/ai/weekly/preview', { endDate: today }, OPERATOR_TOKEN);
+  check('周报预览 200 且 content>50 且非降级',
+    w1.status === 200 && String(w1.json?.data?.content ?? '').length > 50 && w1.json?.data?.fallback === false,
+    `len=${w1.json?.data?.content?.length}`);
+  check('周报 summary 含环比与 7 行逐日数据',
+    String(w1.json?.data?.summary ?? '').includes('环比')
+      && (w1.json?.data?.summary ?? '').split('\n').filter(l => /^\d{2}-\d{2}：/.test(l)).length === 7,
+    `summary=${JSON.stringify(w1.json?.data?.summary)?.slice(0, 100)}`);
+
+  // 19.8 周报保存：类型隔离（WEEK 不混入默认日报分页）+ 幂等覆盖
+  const ws1 = await req('POST', '/ai/weekly/save', { endDate: today, content: w1.json?.data?.content }, OPERATOR_TOKEN);
+  const wp = await req('GET', '/ai/daily/page?pageNum=1&pageSize=10&reportType=WEEK', null, OPERATOR_TOKEN);
+  check('周报保存 200 且 WEEK 分页 1 条',
+    ws1.status === 200 && String(wp.json?.data?.total) === '1'
+      && wp.json?.data?.records?.[0]?.reportType === 'WEEK',
+    `total=${wp.json?.data?.total}`);
+  const dp = await req('GET', `/ai/daily/page?pageNum=1&pageSize=10&reportDate=${today}`, null, OPERATOR_TOKEN);
+  const dayOnly = (dp.json?.data?.records ?? []).filter(r => r.reportDate === today);
+  check('默认日报分页同日仅 1 条且 reportType=DAY（周报不混入）',
+    dayOnly.length === 1 && dayOnly[0]?.reportType === 'DAY',
+    `sameDate=${dayOnly.length} types=${dayOnly.map(r => r.reportType).join(',')}`);
+  const ws2 = await req('POST', '/ai/weekly/save', { endDate: today, content: w1.json?.data?.content }, OPERATOR_TOKEN);
+  const wp2 = await req('GET', '/ai/daily/page?pageNum=1&pageSize=10&reportType=WEEK', null, OPERATOR_TOKEN);
+  check('周报重复保存幂等（WEEK 仍 1 条）', ws2.status === 200 && String(wp2.json?.data?.total) === '1',
+    `total=${wp2.json?.data?.total}`);
+
+  // 19.9 收尾归位：reindex 重跑一遍保证向量态=种子态（对应 clean-smoke.sql 第 9 节注释）
+  const r3 = await req('POST', '/ai/knowledge/reindex', {}, ADMIN_TOKEN);
+  check('收尾 reindex 幂等归位（docCount=4 且段数一致）',
+    r3.status === 200 && r3.json?.data?.docCount === 4 && r3.json?.data?.sectionCount === r1.json?.data?.sectionCount,
+    JSON.stringify(r3.json?.data));
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);

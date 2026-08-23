@@ -87,3 +87,7 @@ DELETE FROM mes_inventory WHERE NOT (item_type = 'MATERIAL' AND item_ref_id IN (
 DELETE FROM mes_report_material_batch;
 DELETE FROM mes_material_batch WHERE id > 12;
 UPDATE mes_material_batch SET used_qty = 0 WHERE id <= 12;
+
+-- 9. 向量索引（第 7 周）：Qdrant 侧由冒烟 19.9 收尾 reindex 归位种子 4 篇文档
+--    （本脚本不直接操作 Qdrant）。若只清库不跑冒烟（或 Qdrant 有孤儿点），
+--    需手动调 POST /ai/knowledge/reindex（admin）重建。
