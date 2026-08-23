@@ -94,6 +94,13 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+
+        <!-- EasyExcel（第 6 周报表导出：4.0.3 与 poi 5 兼容，本地仓库无则 Maven 下载） -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>easyexcel</artifactId>
+            <version>4.0.3</version>
+        </dependency>
     </dependencies>
 
     <build>
