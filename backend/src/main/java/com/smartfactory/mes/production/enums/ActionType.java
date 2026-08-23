@@ -17,7 +17,13 @@ public enum ActionType {
     PAUSE("PAUSE", "暂停"),
     RESUME("RESUME", "继续"),
     REPORT("REPORT", "报工"),
-    CANCEL("CANCEL", "取消");
+    CANCEL("CANCEL", "取消"),
+    INSPECT_TASK("INSPECT_TASK", "质检任务生成"),
+    INSPECT("INSPECT", "质检录入"),
+    DEFECT("DEFECT", "不良登记"),
+    EXCEPTION_CREATE("EXCEPTION_CREATE", "异常单创建"),
+    EXCEPTION_PROCESS("EXCEPTION_PROCESS", "异常处理"),
+    EXCEPTION_CLOSE("EXCEPTION_CLOSE", "异常关闭");
 
     @EnumValue
     @JsonValue

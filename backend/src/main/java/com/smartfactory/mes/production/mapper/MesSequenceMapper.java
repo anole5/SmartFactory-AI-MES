@@ -33,6 +33,18 @@ public interface MesSequenceMapper {
                   @Param("tenantId") Long tenantId);
 
     /**
+     * 批量原子自增（SN 批量取号用）：一次 UPDATE 取 count 个连续号，
+     * LAST_INSERT_ID 记录的是区间末值，区间 = [末值-count+1, 末值]。
+     * 比逐台取号少 count-1 次行锁竞争。
+     */
+    @Update("UPDATE mes_sequence SET current_value = LAST_INSERT_ID(current_value + #{count}) "
+            + "WHERE seq_type = #{seqType} AND seq_date = #{seqDate} AND tenant_id = #{tenantId}")
+    int incrementBatch(@Param("seqType") String seqType,
+                       @Param("seqDate") String seqDate,
+                       @Param("tenantId") Long tenantId,
+                       @Param("count") int count);
+
+    /**
      * 取回本连接的本次自增值（连接级会话变量，绝不串号）
      */
     @Select("SELECT LAST_INSERT_ID()")

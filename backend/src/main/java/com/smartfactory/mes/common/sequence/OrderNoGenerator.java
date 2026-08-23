@@ -7,6 +7,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 业务单号生成器：mes_sequence 表 + MySQL 原子自增。
@@ -66,6 +68,47 @@ public class OrderNoGenerator {
     /** 工艺路线单号，如 RT202608230001（第 2 周起替换时间戳格式） */
     public String nextRouteNo() {
         return next("RT");
+    }
+
+    /** 质检任务号，如 INP202608230001（第 3 周） */
+    public String nextInspectionTaskNo() {
+        return next("INP");
+    }
+
+    /** 质检记录号，如 INS202608230001（第 3 周） */
+    public String nextInspectionRecordNo() {
+        return next("INS");
+    }
+
+    /** 不良单号，如 DEF202608230001（第 3 周） */
+    public String nextDefectNo() {
+        return next("DEF");
+    }
+
+    /** 异常单号，如 EXP202608230001（第 3 周） */
+    public String nextExceptionNo() {
+        return next("EXP");
+    }
+
+    /**
+     * 批量生成 count 个连续整机 SN（第 3 周：最后一道工序报工完成时按合格数量生成）。
+     * 一次 UPDATE 取整段连续号（区间末值 - count + 1 .. 末值），比逐台取号少 count-1 次行锁竞争；
+     * 事务约束与 {@link #next(String)} 相同：必须同事务保证同连接。
+     *
+     * @return 如 ["SN202608230001", "SN202608230002", ...]（当日连续流水）
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    public List<String> nextSnBatch(int count) {
+        String date = LocalDate.now().format(DATE_FORMATTER);
+        mesSequenceMapper.insertIgnoreToday("SN", date, DEFAULT_TENANT_ID);
+        mesSequenceMapper.incrementBatch("SN", date, DEFAULT_TENANT_ID, count);
+        Long end = mesSequenceMapper.lastInsertId();
+        long start = end - count + 1;
+        List<String> sns = new ArrayList<>(count);
+        for (long i = start; i <= end; i++) {
+            sns.add("SN" + date + String.format("%04d", i));
+        }
+        return sns;
     }
 
     /**
