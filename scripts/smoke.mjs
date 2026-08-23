@@ -1,12 +1,14 @@
 // SmartFactory-MES 冒烟测试脚本（Node 18+ 内置 fetch）
-// 第 2 周版：真实登录（JWT）→ 第 1 周断言回归（基础资料）→ 生产执行主链路 + 权限边界 + BOM/路线升版
-// 前置条件：干净库重放 00→04 后运行（种子产品 3 条等断言依赖干净状态）
+// 第 3 周版：真实登录（JWT）→ 第 1/2 周断言回归（基础资料/生产执行/BOM升版）
+//   → 第 3 周质量链路（质检任务/检验录入/不良/异常）+ SN 追溯 + 批次追溯 + 生产看板
+// 前置条件：干净库重放 00→06 后运行（种子产品 3 条等断言依赖干净状态）
 // 运行后清理：Git Bash 执行 scripts/clean-smoke.sql 回到种子状态
 const BASE = 'http://localhost:8080/api';
 let pass = 0, fail = 0;
 let ADMIN_TOKEN = null;
 let OPERATOR_TOKEN = null;
 let PLANNING_TOKEN = null;
+let QA_TOKEN = null;
 
 // token 参数：默认 admin；显式传 null 表示不带 token
 async function req(method, path, body, token) {
@@ -60,6 +62,19 @@ function check(name, cond, detail) {
 
   const r5 = await req('GET', '/master/products/page?pageNum=1&pageSize=10', null, null);
   check('无 token -> 401', r5.status === 401, `status=${r5.status}`);
+
+  // 第 3 周新角色：质检员 qa（种子 id=4，INSPECTOR 角色）
+  const r6 = await req('POST', '/auth/login', { username: 'qa', password: 'qa123' }, null);
+  QA_TOKEN = r6.json?.data?.token;
+  const qaPerms = r6.json?.data?.permissions ?? [];
+  check('qa 登录成功', r6.status === 200 && r6.json?.code === 0 && !!QA_TOKEN,
+    JSON.stringify(r6.json)?.slice(0, 150));
+  check('qa 权限含检验录入/追溯/看板，不含工单建单',
+    qaPerms.includes('quality:inspection-record:create') &&
+      qaPerms.includes('production:trace:query') &&
+      qaPerms.includes('production:dashboard:query') &&
+      !qaPerms.includes('production:work-order:create'),
+    JSON.stringify(qaPerms));
 }
 
 // ------------------------------------------------------------
@@ -358,7 +373,182 @@ let taskIds = [];
   check('追溯链 ASSIGN=13 / START=13', countBy.ASSIGN === 13 && countBy.START === 13, JSON.stringify(countBy));
   check('追溯链 PAUSE=1 / RESUME=1', countBy.PAUSE === 1 && countBy.RESUME === 1, JSON.stringify(countBy));
   check('追溯链 REPORT=13（失败报工事务回滚零残留）', countBy.REPORT === 13, JSON.stringify(countBy));
-  check('追溯总条数 = 43', traces.length === 43, `got ${traces.length}`);
+  check('9 个需质检工序各生成 1 个质检任务（INSPECT_TASK=9）', countBy.INSPECT_TASK === 9, JSON.stringify(countBy));
+  check('追溯总条数 = 52（43 + 9 质检任务生成）', traces.length === 52, `got ${traces.length}`);
+}
+
+// ------------------------------------------------------------
+// 12. 整机 SN：最后一道报工完成自动铸号 10 台 + 按 SN 追溯
+// ------------------------------------------------------------
+{
+  const page = (await req('GET', `/production/sns/page?pageNum=1&pageSize=20&workOrderId=${woId}`)).json?.data;
+  check('SN 分页 total = 10（按工单限定）', String(page?.total) === '10' && (page?.records ?? []).length === 10,
+    `total=${page?.total}`);
+  const sns = page?.records ?? [];
+  check('SN 格式 = SN+日期+4位流水', sns.every(s => /^SN\d{12}$/.test(s.sn)),
+    JSON.stringify(sns.map(s => s.sn)));
+  check('SN 回填工单号/产品/出生报工单号',
+    sns.every(s => s.workOrderNo && s.productNameSnapshot && s.reportNo),
+    JSON.stringify(sns[0] ?? {}));
+
+  const st = await req('GET', `/production/traces/sn?sn=${sns[0].sn}`);
+  check('按 SN 追溯成功（工单号一致 + 时间线 52 条）',
+    st.status === 200 && st.json?.code === 0 &&
+      st.json?.data?.workOrderNo === sns[0].workOrderNo &&
+      (st.json?.data?.timeline ?? []).length === 52,
+    JSON.stringify({ workOrderNo: st.json?.data?.workOrderNo, timeline: st.json?.data?.timeline?.length }));
+
+  const un = await req('GET', '/production/traces/sn?sn=SN999999999999');
+  check('未知 SN -> 404', un.status === 404 && un.json?.code === 404, `status=${un.status}`);
+}
+
+// ------------------------------------------------------------
+// 13. 质量链路（qa）：质检任务 -> 检验录入 -> 不良 -> 异常单 -> 处理 -> 关闭
+// ------------------------------------------------------------
+{
+  const page = (await req('GET', `/quality/inspection-tasks/page?pageNum=1&pageSize=20&workOrderId=${woId}`, null, QA_TOKEN)).json?.data;
+  check('质检任务 9 条（9 个需质检工序）', String(page?.total) === '9' && (page?.records ?? []).length === 9,
+    `total=${page?.total}`);
+  const tasks = page?.records ?? [];
+  check('质检任务全部 PENDING + planQty=10（=工序累计完成数）',
+    tasks.every(t => t.status === 'PENDING' && t.planQty === 10),
+    JSON.stringify(tasks.map(t => `${t.processCodeSnapshot}:${t.status}:${t.planQty}`)));
+
+  const iqc = tasks.find(t => t.processCodeSnapshot === 'IQC');
+  const aging = tasks.find(t => t.processCodeSnapshot === 'AGING');
+  check('找到 IQC 与 AGING 质检任务', !!iqc && !!aging,
+    JSON.stringify(tasks.map(t => t.processCodeSnapshot)));
+
+  const n1 = await req('POST', '/quality/inspection-records',
+    { inspectionTaskId: iqc.id, goodQty: 10, defectQty: 0 }, QA_TOKEN);
+  check('PENDING 直接录入 -> 409', n1.status === 409, `status=${n1.status}`);
+
+  const s1 = await req('PUT', `/quality/inspection-tasks/${iqc.id}/start`, {}, QA_TOKEN);
+  check('开始检验 IQC 成功', s1.json?.code === 0, JSON.stringify(s1.json)?.slice(0, 150));
+  const r1 = await req('POST', '/quality/inspection-records',
+    { inspectionTaskId: iqc.id, goodQty: 10, defectQty: 0, remark: '冒烟 IQC 全检合格' }, QA_TOKEN);
+  check('IQC 录入 10 良成功', r1.json?.code === 0, JSON.stringify(r1.json)?.slice(0, 150));
+  const iqcAfter = (await req('GET', `/quality/inspection-tasks/${iqc.id}`, null, QA_TOKEN)).json?.data;
+  check('IQC 任务 COMPLETED 且累计 10/10/0',
+    iqcAfter?.status === 'COMPLETED' && iqcAfter?.inspectedQty === 10 &&
+      iqcAfter?.goodQty === 10 && iqcAfter?.defectQty === 0,
+    JSON.stringify({ status: iqcAfter?.status, inspectedQty: iqcAfter?.inspectedQty, goodQty: iqcAfter?.goodQty }));
+
+  const s2 = await req('PUT', `/quality/inspection-tasks/${aging.id}/start`, {}, QA_TOKEN);
+  check('开始检验 AGING 成功', s2.json?.code === 0, JSON.stringify(s2.json)?.slice(0, 150));
+  const r2 = await req('POST', '/quality/inspection-records', {
+    inspectionTaskId: aging.id,
+    goodQty: 9,
+    defectQty: 1,
+    defectItems: [{ defectCode: 'FLOWER_SCREEN', defectQty: 1, remark: '老化过程花屏' }],
+  }, QA_TOKEN);
+  check('AGING 录入 9 良 1 不良（FLOWER_SCREEN）成功', r2.json?.code === 0,
+    JSON.stringify(r2.json)?.slice(0, 150));
+
+  const defPage = (await req('GET', `/quality/defects/page?pageNum=1&pageSize=10&workOrderId=${woId}`, null, QA_TOKEN)).json?.data;
+  check('不良记录 1 条', String(defPage?.total) === '1', `total=${defPage?.total}`);
+  const defect = defPage?.records?.[0];
+  check('不良单号 DEF+日期+4位流水 + 编码正确',
+    /^DEF\d{12}$/.test(defect?.defectNo ?? '') && defect?.defectCode === 'FLOWER_SCREEN',
+    JSON.stringify({ defectNo: defect?.defectNo, defectCode: defect?.defectCode }));
+
+  const toExp = await req('PUT', `/quality/defects/${defect.id}/to-exception`, {}, QA_TOKEN);
+  check('不良生成异常单成功', toExp.json?.code === 0, JSON.stringify(toExp.json)?.slice(0, 150));
+  const dupExp = await req('PUT', `/quality/defects/${defect.id}/to-exception`, {}, QA_TOKEN);
+  check('重复生成异常单 -> 409', dupExp.status === 409, `status=${dupExp.status}`);
+  const expPage = (await req('GET', `/quality/exceptions/page?pageNum=1&pageSize=10&workOrderId=${woId}`, null, QA_TOKEN)).json?.data;
+  check('异常单 1 条（DEFECT 来源 + OPEN）',
+    String(expPage?.total) === '1' && expPage?.records?.[0]?.sourceType === 'DEFECT' && expPage?.records?.[0]?.status === 'OPEN',
+    JSON.stringify(expPage?.records?.[0] ?? {}));
+  const exp = expPage?.records?.[0];
+  check('异常单号 EXP+日期+4位流水', /^EXP\d{12}$/.test(exp?.exceptionNo ?? ''), exp?.exceptionNo);
+
+  const p1 = await req('PUT', `/quality/exceptions/${exp.id}/process`, {}, QA_TOKEN);
+  check('处理异常 -> PROCESSING', p1.json?.code === 0, JSON.stringify(p1.json)?.slice(0, 150));
+  const c1 = await req('PUT', `/quality/exceptions/${exp.id}/close`,
+    { resolveRemark: '更换主板后老化复测通过' }, QA_TOKEN);
+  check('关闭异常（带处理结论）成功', c1.json?.code === 0, JSON.stringify(c1.json)?.slice(0, 150));
+  const expAfter = (await req('GET', `/quality/exceptions/page?pageNum=1&pageSize=10&workOrderId=${woId}`, null, QA_TOKEN)).json?.data?.records?.[0];
+  check('异常单 CLOSED + 处理人/结论/关闭时间回填',
+    expAfter?.status === 'CLOSED' && !!expAfter?.handlerName && !!expAfter?.resolveRemark && !!expAfter?.resolvedAt,
+    JSON.stringify({ status: expAfter?.status, handlerName: expAfter?.handlerName }));
+
+  const opStart = await req('PUT', `/quality/inspection-tasks/${iqc.id}/start`, {}, OPERATOR_TOKEN);
+  check('operator 开始检验 -> 403', opStart.status === 403, `status=${opStart.status}`);
+}
+
+// ------------------------------------------------------------
+// 14. 质量追溯复核 + 批次追溯
+// ------------------------------------------------------------
+{
+  const traces = (await req('GET', `/production/traces?workOrderId=${woId}`)).json?.data ?? [];
+  const countBy = {};
+  for (const t of traces) countBy[t.actionType] = (countBy[t.actionType] ?? 0) + 1;
+  check('INSPECT=2 / DEFECT=1', countBy.INSPECT === 2 && countBy.DEFECT === 1, JSON.stringify(countBy));
+  check('EXCEPTION_CREATE/PROCESS/CLOSE 各 1',
+    countBy.EXCEPTION_CREATE === 1 && countBy.EXCEPTION_PROCESS === 1 && countBy.EXCEPTION_CLOSE === 1,
+    JSON.stringify(countBy));
+  check('追溯总条数 = 58（52 + 质量链路 6）', traces.length === 58, `got ${traces.length}`);
+
+  const bt = await req('GET', '/production/traces/batch?batchNo=SMOKE-BATCH-01');
+  check('批次追溯：报工 1 条 + 工单去重 1',
+    (bt.json?.data?.reports ?? []).length === 1 && (bt.json?.data?.workOrders ?? []).length === 1,
+    JSON.stringify({ reports: bt.json?.data?.reports?.length, workOrders: bt.json?.data?.workOrders?.length }));
+  check('批次报工回填工单号/工序/操作人',
+    bt.json?.data?.reports?.[0]?.workOrderNo && bt.json?.data?.reports?.[0]?.processNameSnapshot &&
+      bt.json?.data?.reports?.[0]?.operatorName,
+    JSON.stringify(bt.json?.data?.reports?.[0] ?? {}));
+  check('批次涉及工单 COMPLETED 10/10',
+    bt.json?.data?.workOrders?.[0]?.status === 'COMPLETED' && bt.json?.data?.workOrders?.[0]?.completedQty === 10,
+    JSON.stringify(bt.json?.data?.workOrders?.[0] ?? {}));
+  const empty = await req('GET', '/production/traces/batch?batchNo=NO-SUCH-BATCH');
+  check('未知批次 -> 空列表', empty.json?.code === 0 && (empty.json?.data?.reports ?? []).length === 0,
+    JSON.stringify(empty.json)?.slice(0, 150));
+}
+
+// ------------------------------------------------------------
+// 15. 生产看板聚合 + 设备主数据 + 权限边界收口
+// ------------------------------------------------------------
+{
+  const s = await req('GET', '/dashboard/summary');
+  check('看板 summary 成功', s.status === 200 && s.json?.code === 0, JSON.stringify(s.json)?.slice(0, 150));
+  const d = s.json?.data ?? {};
+  check('今日产量 >= 10（冒烟报工）', Number(d.todayOutputQty) >= 10, `todayOutputQty=${d.todayOutputQty}`);
+  check('今日良率 null 或 0-100', d.todayYieldRate == null || (d.todayYieldRate >= 0 && d.todayYieldRate <= 100),
+    `todayYieldRate=${d.todayYieldRate}`);
+  check('设备状态分布合计 >= 10（种子 10 台）',
+    Array.isArray(d.equipmentStatusCounts) && d.equipmentStatusCounts.length > 0 &&
+      d.equipmentStatusCounts.reduce((a, c) => a + Number(c.count), 0) >= 10,
+    JSON.stringify(d.equipmentStatusCounts));
+
+  const wo = await req('GET', '/dashboard/work-orders');
+  check('看板进行中工单返回数组', wo.json?.code === 0 && Array.isArray(wo.json?.data),
+    JSON.stringify(wo.json?.data)?.slice(0, 100));
+
+  const q = await req('GET', '/dashboard/quality');
+  check('看板工序良率非空（9 工序有数据）', q.json?.code === 0 && (q.json?.data?.processYields ?? []).length > 0,
+    JSON.stringify(q.json?.data?.processYields?.map(p => p.processName)));
+  check('看板整体良率 null 或 0-100',
+    q.json?.data?.overallYieldRate == null || (q.json?.data?.overallYieldRate >= 0 && q.json?.data?.overallYieldRate <= 100),
+    `overallYieldRate=${q.json?.data?.overallYieldRate}`);
+  check('看板不良分布含 FLOWER_SCREEN',
+    (q.json?.data?.defectDistribution ?? []).some(r => r.defectCode === 'FLOWER_SCREEN'),
+    JSON.stringify(q.json?.data?.defectDistribution));
+
+  const eq = await req('GET', '/dashboard/equipment');
+  const eqList = eq.json?.data?.equipment ?? [];
+  const eqDist = eq.json?.data?.statusCounts ?? [];
+  check('看板设备列表与分布合计一致（>=10 台）',
+    eq.json?.code === 0 && eqList.length === eqDist.reduce((a, c) => a + Number(c.count), 0) && eqList.length >= 10,
+    JSON.stringify({ list: eqList.length, dist: eqDist }));
+
+  const eqPage = await req('GET', '/master/equipment/page?pageNum=1&pageSize=20');
+  check('设备主数据 >= 10 行（种子）', Number(eqPage.json?.data?.total) >= 10, `total=${eqPage.json?.data?.total}`);
+
+  const qs = await req('GET', '/dashboard/summary', null, QA_TOKEN);
+  check('qa 查看板 200', qs.status === 200 && qs.json?.code === 0, `status=${qs.status}`);
+  const qe = await req('POST', '/master/equipment', { equipmentCode: 'EQ-QA-X', equipmentName: '越权' }, QA_TOKEN);
+  check('qa 建设备 -> 403', qe.status === 403, `status=${qe.status}`);
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);

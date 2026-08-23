@@ -10,7 +10,7 @@
 | 层 | 技术 |
 |---|---|
 | 后端 | Java 17、Spring Boot 3.5.16、MyBatis-Plus 3.5.16、MySQL 8、Lombok |
-| 前端 | Vue 3、Vite、TypeScript、Element Plus、Pinia、Vue Router、Axios |
+| 前端 | Vue 3、Vite、TypeScript、Element Plus、Pinia、Vue Router、Axios、ECharts |
 | 部署 | Docker（开发环境复用本机已有 MySQL 容器） |
 
 ## 目录结构
@@ -42,6 +42,8 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/02-seed-master.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/03-schema-week2.sql
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/04-seed-week2.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/05-schema-week3.sql
+docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < sql/06-seed-week3.sql
 ```
 
 > 注意：Windows PowerShell 管道会以 GBK 破坏 UTF-8 内容，请在 Git Bash 中执行；
@@ -69,23 +71,30 @@ npm run dev
 | 账号 | 密码 | 角色 | 权限 |
 |---|---|---|---|
 | admin | admin123 | 系统管理员 | 全部菜单与按钮 |
-| operator | operator123 | 操作工 | 工单/任务查询 + 派工/开工/暂停/继续 + 报工 |
-| planning | planning123 | 计划员 | 工单全操作 + 基础资料只读（无报工） |
+| operator | operator123 | 操作工 | 工单/任务查询 + 派工/开工/暂停/继续 + 报工 + 追溯/看板查询 |
+| planning | planning123 | 计划员 | 工单全操作 + 基础资料只读（无报工）+ 追溯/看板查询 |
+| qa | qa123 | 质检员 | 质检任务/检验录入/不良/异常全流程 + 追溯/看板查询 |
 
-### 4. 演示路径（第 2 周生产执行主链路）
+### 4. 演示路径（第 3 周质量追溯闭环）
 
 1. **admin** 登录 → 生产工单 → 新建（选 TV-AOC-55U4K-001，自动解析其生效 BOM/工艺路线）
    → 下发 → 自动生成 13 个工序任务（详情抽屉可看追溯时间线）
 2. **operator** 登录 → 工序任务 → 派工 → 开工 → 暂停/继续 → 逐道报工（合格/不良数量，
    后道合格不能超过前道）
-3. 13 道全部报满 → 工单自动 COMPLETED（完成数量 = 最后一道工序合格数量）→ 报工记录页核对
-4. 权限差异：admin 看到全部按钮，operator 只见任务操作与报工按钮，planning 无报工按钮
+3. 13 道全部报满 → 工单自动 COMPLETED（完成数量 = 最后一道工序合格数量）→ 报工记录页核对；
+   其中 9 个需质检工序各自生成质检任务，最后一道报工完成时按合格数批量生成整机 SN
+4. **qa** 登录 → 质检任务 → 开始检验 → 检验录入（合格/不良数 + 不良行子表，可分次录入）
+5. 不良记录 → 生成异常单 → 异常管理 → 处理 → 关闭（填处理结论）
+6. **追溯查询**：按 SN（出生信息 + 工单时间线）/ 按批次（批次报工列表 + 工单去重）/ 按工单
+7. **设备管理**：10 台种子设备状态每 15s 自动漂移，可手动切换
+8. **生产看板**：6 KPI + 4 图表（工单进度/工序良率/不良分布/设备状态）10s 自动刷新
+9. 权限差异：admin 看到全部按钮，operator 只见任务操作与报工按钮，qa 只见质检/追溯/看板
 
 ### 冒烟测试
 
 ```bash
 # 后端启动后执行（Node 18+ 内置 fetch，无需安装依赖）
-# 78 项断言：真实登录 + 基础资料回归 + 生产执行全链路 + BOM 升版联动
+# 124 项断言：第 1/2 周回归 + 质量链路（质检/不良/异常）+ SN/批次追溯 + 生产看板 + 权限边界
 node scripts/smoke.mjs
 
 # 冒烟数据一键清理回种子状态（Git Bash）
@@ -120,6 +129,24 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | 报工 | POST | `/api/production/reports` | 报工（数量校验链 + 进度回写 + 追溯记录） |
 | 报工 | GET | `/api/production/reports/page` | 分页（workOrderId/operatorId） |
 | 追溯 | GET | `/api/production/traces?workOrderId=` | 工单追溯时间线 |
+| 追溯 | GET | `/api/production/traces/sn?sn=` | 按 SN 追溯（出生信息 + 时间线，未知 404） |
+| 追溯 | GET | `/api/production/traces/batch?batchNo=` | 按批次追溯（报工列表 + 工单去重） |
+| SN | GET | `/api/production/sns/page` | 整机 SN 分页（workOrderId/keyword） |
+| 质检 | GET | `/api/quality/inspection-tasks/page`、`/{id}`、`/{id}/records` | 任务分页/详情/任务全部记录 |
+| 质检 | PUT | `/api/quality/inspection-tasks/{id}/start` | 开始检验（CAS PENDING→INSPECTING） |
+| 质检 | POST | `/api/quality/inspection-records` | 检验录入（合格/不良数 + 不良行子表，分次累计 CAS） |
+| 不良 | GET | `/api/quality/defects/page` | 不良记录分页（workOrderId/defectCode/keyword） |
+| 不良 | PUT | `/api/quality/defects/{id}/to-exception` | 生成异常单（已有未关闭异常单 409） |
+| 异常 | GET | `/api/quality/exceptions/page` | 异常单分页（workOrderId/status/keyword） |
+| 异常 | POST | `/api/quality/exceptions` | 手工创建异常单 |
+| 异常 | PUT | `/api/quality/exceptions/{id}/process`、`/{id}/close` | 处理/关闭（close 必填处理结论） |
+| 设备 | GET | `/api/master/equipment/page`、`/{id}` | 设备分页/详情 |
+| 设备 | POST/PUT | `/api/master/equipment` | 新增/编辑（写权限仅 admin） |
+| 设备 | PUT | `/api/master/equipment/{id}/status` | 状态切换（@Scheduled 每 15s 随机漂移） |
+| 看板 | GET | `/api/dashboard/summary` | 今日产量/报工/不良/良率/进行中工单/未关闭异常/设备分布 |
+| 看板 | GET | `/api/dashboard/work-orders` | 进行中工单进度（progressPercent） |
+| 看板 | GET | `/api/dashboard/quality` | 整体良率 + 工序良率 + 不良分布 |
+| 看板 | GET | `/api/dashboard/equipment` | 设备列表 + 状态分布 |
 
 ## 技术决策记录
 
@@ -143,12 +170,24 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
     格式 `WO202608230001`；UPDATE 行锁串行并发请求。
 12. **并发安全靠条件更新 CAS**：下发 `WHERE status='DRAFT'` 防双下发；报工 `WHERE status='RUNNING'
     AND completed_qty+?<=plan_qty` 防超量，一条 UPDATE 完成校验+累加+状态结转。
+13. **质检任务生成在报工事务内**：`need_inspection=1 && 任务达 COMPLETED` → 插质检任务 + 写追溯，
+    失败随报工整单回滚；工单取消级联取消 PENDING/INSPECTING 质检任务。
+14. **SN 批量取号**：`UPDATE mes_sequence SET current_value=LAST_INSERT_ID(current_value+N)` 一次取连续
+    区段 [end-count+1, end]（比逐台取号少 N-1 次锁竞争）；守卫"最后一道 COMPLETED 且 good>0"防提前铸号。
+15. **质检分次录入 CAS**：`WHERE status='INSPECTING' AND inspected_qty+本次<=plan_qty` +
+    `status=IF(达标,'COMPLETED',status)`，与报工同款一条 UPDATE 完成校验+累加+结转。
+16. **看板自定义 SQL 显式 `deleted=0`**：MP 逻辑删除只作用于 wrapper，注解 SQL 不带会被删除数据
+    "复活"进统计。
+17. **设备漂移模拟需 @EnableScheduling**：@Scheduled 注解配齐但启动类缺总开关会静默不触发
+    （无报错无日志）；`@ConditionalOnProperty(equipment.simulate.enabled)` 可一键关闭。
+18. **看板良率无数据返回 null**：good+defect=0 时良率 null 而非 0，前端显示 '-'——"没数据"与"零"
+    业务语义不同。
 
 ## 开发进度
 
-> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md)
+> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md)
 
 - [x] 第 1 周：工程骨架 + 基础资料（产品/物料/BOM/工艺路线/工序/工位）+ 电视 Demo 大屏
 - [x] 第 2 周：生产执行（工单/下发/工序任务/派工/报工）+ 真实登录权限（JWT/RBAC）
-- [ ] 第 3 周：质量、追溯与看板
+- [x] 第 3 周：质量追溯看板（质检任务/检验录入/不良/异常 + SN/批次追溯 + 设备漂移模拟 + ECharts 大屏）
 - [ ] 第 4 周：AI 应用与项目包装
