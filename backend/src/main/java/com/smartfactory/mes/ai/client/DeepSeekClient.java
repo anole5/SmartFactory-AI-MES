@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartfactory.mes.ai.dto.StreamChunk;
 import com.smartfactory.mes.ai.exception.AiServiceException;
+import com.smartfactory.mes.ai.sse.StreamCancelledException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -108,8 +109,8 @@ public class DeepSeekClient {
             JsonNode root = objectMapper.readTree(response);
             JsonNode message = root.path("choices").path(0).path("message");
             JsonNode content = message.path("content");
-            if (content.isMissingNode() || content.asText().isBlank()) {
-                // 推理模型（pro 档）reasoning 吃满预算时 content 为空：调大 ai.deepseek.max-tokens-pro
+            if (content.isMissingNode() || content.isNull() || content.asText().isBlank()) {
+                // 推理模型（pro 档）reasoning 吃满预算时 content 为 null：调大 ai.deepseek.max-tokens-pro
                 boolean reasoning = message.hasNonNull("reasoning_content");
                 log.warn("DeepSeek 返回内容为空: model={}, hasReasoning={}", root.path("model").asText(), reasoning);
                 throw new AiServiceException("DeepSeek 返回内容为空: " + root.path("model").asText()
@@ -167,8 +168,9 @@ public class DeepSeekClient {
                                 }
                                 JsonNode node = objectMapper.readTree(data);
                                 JsonNode content = node.path("choices").path(0).path("delta").path("content");
-                                if (content.isMissingNode() || content.asText().isEmpty()) {
-                                    // 跳过 role/reasoning_content 等非内容分块
+                                if (content.isMissingNode() || content.isNull() || content.asText().isEmpty()) {
+                                    // 跳过 role/reasoning_content 及 content=null 的推理中间分块
+                                    // （pro 档推理期间 content 为 JSON null，asText() 会返回字符串 "null"，必须显式过滤）
                                     continue;
                                 }
                                 onChunk.accept(new StreamChunk(content.asText()));
@@ -176,6 +178,8 @@ public class DeepSeekClient {
                         }
                         return null;
                     });
+        } catch (StreamCancelledException e) {
+            // 客户端停止按钮断开：静默结束，不落日志不落库（正常用户行为）
         } catch (AiServiceException e) {
             throw e;
         } catch (Exception e) {

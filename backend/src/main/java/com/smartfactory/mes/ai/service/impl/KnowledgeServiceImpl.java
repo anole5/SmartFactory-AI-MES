@@ -17,6 +17,7 @@ import com.smartfactory.mes.ai.exception.AiServiceException;
 import com.smartfactory.mes.ai.mapper.AiQaRecordMapper;
 import com.smartfactory.mes.ai.mapper.KnowledgeDocMapper;
 import com.smartfactory.mes.ai.service.KnowledgeService;
+import com.smartfactory.mes.ai.sse.StreamSink;
 import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
@@ -102,18 +103,11 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
     @Transactional
     public AiAskVO ask(String question) {
         // ① 关键词打分召回：仅 ENABLED 文档参与检索（停用 = 业务下线，不参与召回）
-        List<MesKnowledgeDoc> enabled = this.list(new LambdaQueryWrapper<MesKnowledgeDoc>()
-                .eq(MesKnowledgeDoc::getStatus, KnowledgeDocStatus.ENABLED));
-        List<DocHit> docHits = enabled.stream()
-                .map(doc -> new DocHit(doc, scoreDoc(doc, question)))
-                .filter(hit -> hit.score > 0)
-                .sorted(Comparator.comparingInt(DocHit::getScore).reversed())
-                .limit(3)
-                .collect(Collectors.toList());
+        List<DocHit> docHits = recallDocs(question);
 
         // ② 无命中：模板兜底话术 + 候选文档列表
         if (docHits.isEmpty()) {
-            String answer = fallbackNoHit(enabled);
+            String answer = fallbackNoHit(enabledDocs());
             Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, "");
             AiAskVO vo = new AiAskVO();
             vo.setAnswer(answer);
@@ -127,27 +121,74 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         List<SectionHit> sections = collectSections(docHits, question);
 
         // ④ 拼上下文调 flash 档生成；LLM 故障降级为命中段落原文
-        StringBuilder context = new StringBuilder("用户问题：").append(question).append("\n\n知识库文档片段：\n");
-        for (SectionHit s : sections) {
-            context.append("【文档：").append(s.docName).append("】").append(s.section).append("\n\n");
-        }
         String answer;
         boolean fallback;
         try {
-            answer = deepSeekClient.chatFast(SYSTEM_PROMPT, context.toString());
+            answer = deepSeekClient.chatFast(SYSTEM_PROMPT, buildContext(question, sections));
             fallback = false;
         } catch (AiServiceException e) {
             answer = fallbackFromSections(sections);
             fallback = true;
         }
 
-        String refDocIds = docHits.stream()
-                .map(hit -> String.valueOf(hit.doc.getId()))
-                .collect(Collectors.joining(","));
-        Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, refDocIds);
-
+        Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, refDocIds(docHits));
         AiAskVO vo = new AiAskVO();
         vo.setAnswer(answer);
+        vo.setReferences(docHits.stream()
+                .map(hit -> new AiReferenceVO(hit.doc.getId(), hit.doc.getDocName()))
+                .collect(Collectors.toList()));
+        vo.setFallback(fallback);
+        vo.setRecordId(recordId);
+        return vo;
+    }
+
+    @Override
+    public AiAskVO askStream(String question, StreamSink sink) {
+        // 管线与 ask() 一致，仅生成调用换成流式：delta 逐块推给前端（打字机）。
+        // 不加 @Transactional：问答记录是流结束后单条 INSERT（自动提交），
+        // 无需为一次插入把数据库连接占满整个 LLM 流式周期。
+        List<DocHit> docHits = recallDocs(question);
+        if (docHits.isEmpty()) {
+            String answer = fallbackNoHit(enabledDocs());
+            sink.sendDelta(answer);
+            if (sink.isCancelled()) {
+                return null;
+            }
+            Long recordId = saveRecord(question, answer, AiIntent.KNOWLEDGE, "");
+            AiAskVO vo = new AiAskVO();
+            vo.setAnswer(answer);
+            vo.setReferences(Collections.emptyList());
+            vo.setFallback(true);
+            vo.setRecordId(recordId);
+            return vo;
+        }
+
+        List<SectionHit> sections = collectSections(docHits, question);
+        StringBuilder answer = new StringBuilder();
+        boolean fallback;
+        try {
+            deepSeekClient.chatFastStream(SYSTEM_PROMPT, buildContext(question, sections),
+                    chunk -> {
+                        answer.append(chunk.getContent());
+                        sink.sendDelta(chunk.getContent());
+                    });
+            fallback = false;
+        } catch (AiServiceException e) {
+            if (sink.isCancelled()) {
+                return null;
+            }
+            String text = fallbackFromSections(sections);
+            answer.append(text);
+            sink.sendDelta(text);
+            fallback = true;
+        }
+        if (sink.isCancelled()) {
+            return null;
+        }
+
+        Long recordId = saveRecord(question, answer.toString(), AiIntent.KNOWLEDGE, refDocIds(docHits));
+        AiAskVO vo = new AiAskVO();
+        vo.setAnswer(answer.toString());
         vo.setReferences(docHits.stream()
                 .map(hit -> new AiReferenceVO(hit.doc.getId(), hit.doc.getDocName()))
                 .collect(Collectors.toList()));
@@ -177,6 +218,22 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
             throw new BusinessException("文档不存在: id=" + id);
         }
         return entity;
+    }
+
+    /** 参与召回的全部启用文档 */
+    private List<MesKnowledgeDoc> enabledDocs() {
+        return this.list(new LambdaQueryWrapper<MesKnowledgeDoc>()
+                .eq(MesKnowledgeDoc::getStatus, KnowledgeDocStatus.ENABLED));
+    }
+
+    /** 文档打分召回：每个关键词命中 +1、文档名命中 +2，score>0 按分数取 top 3 */
+    private List<DocHit> recallDocs(String question) {
+        return enabledDocs().stream()
+                .map(doc -> new DocHit(doc, scoreDoc(doc, question)))
+                .filter(hit -> hit.score > 0)
+                .sorted(Comparator.comparingInt(DocHit::getScore).reversed())
+                .limit(3)
+                .collect(Collectors.toList());
     }
 
     /** 文档打分：每个关键词命中 +1，文档名整体命中 +2（防止关键词与文档名脱节） */
@@ -217,6 +274,15 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
         return result.stream().limit(3).collect(Collectors.toList());
     }
 
+    /** 拼 LLM 上下文：用户问题 + 命中段落（标注来源文档） */
+    private String buildContext(String question, List<SectionHit> sections) {
+        StringBuilder context = new StringBuilder("用户问题：").append(question).append("\n\n知识库文档片段：\n");
+        for (SectionHit s : sections) {
+            context.append("【文档：").append(s.docName).append("】").append(s.section).append("\n\n");
+        }
+        return context.toString();
+    }
+
     /** LLM 故障降级：命中段落原文直出（前端提示"模板回答"） */
     private String fallbackFromSections(List<SectionHit> sections) {
         StringBuilder sb = new StringBuilder("【模板回答】以下为知识库原文片段：\n\n");
@@ -234,6 +300,13 @@ public class KnowledgeServiceImpl extends ServiceImpl<KnowledgeDocMapper, MesKno
             sb.append(enabled.stream().map(MesKnowledgeDoc::getDocName).collect(Collectors.joining("、")));
         }
         return sb.toString();
+    }
+
+    /** 命中文档 id 逗号拼接（问答记录留痕召回来源） */
+    private String refDocIds(List<DocHit> docHits) {
+        return docHits.stream()
+                .map(hit -> String.valueOf(hit.doc.getId()))
+                .collect(Collectors.joining(","));
     }
 
     private Long saveRecord(String question, String answer, AiIntent intent, String refDocIds) {

@@ -9,6 +9,7 @@ import com.smartfactory.mes.ai.enums.KnowledgeDocType;
 import com.smartfactory.mes.ai.exception.AiServiceException;
 import com.smartfactory.mes.ai.mapper.KnowledgeDocMapper;
 import com.smartfactory.mes.ai.service.AssistantService;
+import com.smartfactory.mes.ai.sse.StreamSink;
 import com.smartfactory.mes.common.exception.BusinessException;
 import com.smartfactory.mes.production.enums.ActionType;
 import com.smartfactory.mes.production.service.TraceService;
@@ -62,7 +63,91 @@ public class AssistantServiceImpl implements AssistantService {
     @Override
     public ExceptionSuggestionVO suggest(Long exceptionId) {
         MesExceptionOrder order = mustExist(exceptionId);
+        String context = buildSuggestionContext(order);
 
+        String suggestion;
+        boolean fallback;
+        try {
+            suggestion = deepSeekClient.chatPro(SYSTEM_PROMPT, context);
+            fallback = false;
+        } catch (AiServiceException e) {
+            suggestion = templateByDefectCode(order.getDefectCode());
+            fallback = true;
+        }
+
+        ExceptionSuggestionVO vo = new ExceptionSuggestionVO();
+        vo.setExceptionId(order.getId());
+        vo.setExceptionNo(order.getExceptionNo());
+        vo.setSuggestion(suggestion);
+        vo.setFallback(fallback);
+        return vo;
+    }
+
+    @Override
+    public ExceptionSuggestionVO suggestStream(Long exceptionId, StreamSink sink) {
+        // 管线与 suggest() 一致，仅 pro 档推理换成流式：delta 逐块推给前端（打字机）。
+        MesExceptionOrder order = mustExist(exceptionId);
+        String context = buildSuggestionContext(order);
+
+        StringBuilder suggestion = new StringBuilder();
+        boolean fallback;
+        try {
+            deepSeekClient.chatProStream(SYSTEM_PROMPT, context,
+                    chunk -> {
+                        suggestion.append(chunk.getContent());
+                        sink.sendDelta(chunk.getContent());
+                    });
+            fallback = false;
+        } catch (AiServiceException e) {
+            if (sink.isCancelled()) {
+                return null;
+            }
+            String text = templateByDefectCode(order.getDefectCode());
+            suggestion.append(text);
+            sink.sendDelta(text);
+            fallback = true;
+        }
+        if (sink.isCancelled()) {
+            return null;
+        }
+
+        ExceptionSuggestionVO vo = new ExceptionSuggestionVO();
+        vo.setExceptionId(order.getId());
+        vo.setExceptionNo(order.getExceptionNo());
+        vo.setSuggestion(suggestion.toString());
+        vo.setFallback(fallback);
+        return vo;
+    }
+
+    @Override
+    @Transactional
+    public void save(Long exceptionId, String suggestion) {
+        MesExceptionOrder order = mustExist(exceptionId);
+        order.setAiSuggestion(suggestion);
+        exceptionOrderMapper.updateById(order);
+        // 追溯表 work_order_id 非空约束：仅关联工单的异常写追溯
+        if (order.getWorkOrderId() != null) {
+            traceService.write(order.getWorkOrderId(), order.getOperationTaskId(), ActionType.AI_SUGGEST,
+                    Map.of("exceptionNo", order.getExceptionNo()));
+        }
+    }
+
+    @Override
+    public ExceptionSuggestionVO getSuggestion(Long exceptionId) {
+        MesExceptionOrder order = mustExist(exceptionId);
+        ExceptionSuggestionVO vo = new ExceptionSuggestionVO();
+        vo.setExceptionId(order.getId());
+        vo.setExceptionNo(order.getExceptionNo());
+        vo.setSuggestion(order.getAiSuggestion());
+        return vo;
+    }
+
+    // ------------------------------------------------------------
+    // 私有工具
+    // ------------------------------------------------------------
+
+    /** 召回 + 拼建议上下文（suggest 与 suggestStream 共用） */
+    private String buildSuggestionContext(MesExceptionOrder order) {
         // 知识库召回：不良代码/描述关键词匹配（FAULT_GUIDE 文档优先）
         String queryText = String.valueOf(order.getDefectCode() == null ? "" : order.getDefectCode())
                 + " " + (order.getDescription() == null ? "" : order.getDescription());
@@ -98,51 +183,8 @@ public class AssistantServiceImpl implements AssistantService {
             }
             context.append("【文档：").append(doc.getDocName()).append("】\n").append(content).append("\n\n");
         }
-
-        String suggestion;
-        boolean fallback;
-        try {
-            suggestion = deepSeekClient.chatPro(SYSTEM_PROMPT, context.toString());
-            fallback = false;
-        } catch (AiServiceException e) {
-            suggestion = templateByDefectCode(order.getDefectCode());
-            fallback = true;
-        }
-
-        ExceptionSuggestionVO vo = new ExceptionSuggestionVO();
-        vo.setExceptionId(order.getId());
-        vo.setExceptionNo(order.getExceptionNo());
-        vo.setSuggestion(suggestion);
-        vo.setFallback(fallback);
-        return vo;
+        return context.toString();
     }
-
-    @Override
-    @Transactional
-    public void save(Long exceptionId, String suggestion) {
-        MesExceptionOrder order = mustExist(exceptionId);
-        order.setAiSuggestion(suggestion);
-        exceptionOrderMapper.updateById(order);
-        // 追溯表 work_order_id 非空约束：仅关联工单的异常写追溯
-        if (order.getWorkOrderId() != null) {
-            traceService.write(order.getWorkOrderId(), order.getOperationTaskId(), ActionType.AI_SUGGEST,
-                    Map.of("exceptionNo", order.getExceptionNo()));
-        }
-    }
-
-    @Override
-    public ExceptionSuggestionVO getSuggestion(Long exceptionId) {
-        MesExceptionOrder order = mustExist(exceptionId);
-        ExceptionSuggestionVO vo = new ExceptionSuggestionVO();
-        vo.setExceptionId(order.getId());
-        vo.setExceptionNo(order.getExceptionNo());
-        vo.setSuggestion(order.getAiSuggestion());
-        return vo;
-    }
-
-    // ------------------------------------------------------------
-    // 私有工具
-    // ------------------------------------------------------------
 
     private MesExceptionOrder mustExist(Long id) {
         MesExceptionOrder order = exceptionOrderMapper.selectById(id);

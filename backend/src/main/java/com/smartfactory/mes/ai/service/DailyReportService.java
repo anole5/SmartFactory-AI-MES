@@ -3,6 +3,7 @@ package com.smartfactory.mes.ai.service;
 import com.smartfactory.mes.ai.dto.DailyPreviewVO;
 import com.smartfactory.mes.ai.dto.DailyReportQueryDTO;
 import com.smartfactory.mes.ai.dto.DailyReportVO;
+import com.smartfactory.mes.ai.sse.StreamSink;
 import com.smartfactory.mes.common.api.PageResult;
 
 import java.time.LocalDate;
@@ -14,6 +15,9 @@ public interface DailyReportService {
 
     /** 生成日报预览（不落库） */
     DailyPreviewVO preview(LocalDate reportDate);
+
+    /** 流式日报预览：聚合同 {@link #preview}，flash 档润色流式化；客户端停止返回 null */
+    DailyPreviewVO previewStream(LocalDate reportDate, StreamSink sink);
 
     /** 保存日报（同一 report_date 幂等覆盖） */
     void save(LocalDate reportDate, String content);

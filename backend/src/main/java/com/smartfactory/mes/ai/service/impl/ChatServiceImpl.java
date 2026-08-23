@@ -17,6 +17,7 @@ import com.smartfactory.mes.ai.service.AssistantService;
 import com.smartfactory.mes.ai.service.ChatService;
 import com.smartfactory.mes.ai.service.DailyReportService;
 import com.smartfactory.mes.ai.service.KnowledgeService;
+import com.smartfactory.mes.ai.sse.StreamSink;
 import com.smartfactory.mes.quality.entity.MesExceptionOrder;
 import com.smartfactory.mes.quality.mapper.MesExceptionOrderMapper;
 import org.slf4j.Logger;
@@ -25,8 +26,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -91,6 +94,40 @@ public class ChatServiceImpl implements ChatService {
             default:
                 return routeKnowledge(question);
         }
+    }
+
+    @Override
+    public AiChatVO chatStream(String question, StreamSink sink) {
+        // 事件序：meta{intent 先行} → 子服务流式 delta* → done{recordId,intent,answer,extras}。
+        // 意图识别复用非流式链路（快档零 token 成本不可省，先告诉前端标签再等正文）。
+        AiIntent intent = detectIntent(question);
+        log.info("AI 助手流式意图路由: {} -> {}", question, intent.getCode());
+        sink.sendMeta(Map.of("intent", intent.getCode()));
+
+        AiChatVO vo;
+        switch (intent) {
+            case REPORT:
+                vo = streamReport(question, sink);
+                break;
+            case EXCEPTION:
+                vo = streamException(question, sink);
+                break;
+            case OVERVIEW:
+                vo = streamOverview(question, sink);
+                break;
+            default:
+                vo = streamKnowledge(question, sink);
+        }
+        if (vo == null) {
+            // 客户端停止按钮断开：子服务未落记录，此处也不落
+            return null;
+        }
+        // KNOWLEDGE 路径 askStream 已落记录（intent 与最终意图一致），其余路径此处落库
+        if (vo.getRecordId() == null) {
+            vo.setRecordId(saveRecord(question, vo.getAnswer(), AiIntent.valueOf(vo.getIntent())));
+        }
+        sink.sendDone(buildDoneEvent(vo));
+        return vo;
     }
 
     // ------------------------------------------------------------
@@ -211,6 +248,116 @@ public class ChatServiceImpl implements ChatService {
         vo.setFallback(fallback);
         vo.setRecordId(saveRecord(question, answer, AiIntent.OVERVIEW));
         return vo;
+    }
+
+    // ------------------------------------------------------------
+    // 四类流式路由（与上面对称：只发 delta，done 由 chatStream 统一装配）
+    // ------------------------------------------------------------
+
+    /** 知识库流式：askStream 内部已落问答记录，recordId 带回不复存 */
+    private AiChatVO streamKnowledge(String question, StreamSink sink) {
+        AiAskVO ask = knowledgeService.askStream(question, sink);
+        if (ask == null) {
+            return null;
+        }
+        AiChatVO vo = new AiChatVO();
+        vo.setIntent(AiIntent.KNOWLEDGE.getCode());
+        vo.setAnswer(ask.getAnswer());
+        vo.setReferences(ask.getReferences());
+        vo.setFallback(ask.getFallback());
+        vo.setRecordId(ask.getRecordId());
+        return vo;
+    }
+
+    /** 异常流式：有单号 → pro 建议流式；无单号 → 转知识库流式（intent 归 KNOWLEDGE） */
+    private AiChatVO streamException(String question, StreamSink sink) {
+        Matcher matcher = EXCEPTION_NO.matcher(question);
+        if (matcher.find()) {
+            MesExceptionOrder order = exceptionOrderMapper.selectOne(new LambdaQueryWrapper<MesExceptionOrder>()
+                    .eq(MesExceptionOrder::getExceptionNo, matcher.group()));
+            if (order != null) {
+                ExceptionSuggestionVO suggestion = assistantService.suggestStream(order.getId(), sink);
+                if (suggestion == null) {
+                    return null;
+                }
+                AiChatVO vo = new AiChatVO();
+                vo.setIntent(AiIntent.EXCEPTION.getCode());
+                vo.setAnswer(suggestion.getSuggestion());
+                vo.setFallback(suggestion.getFallback());
+                vo.setExceptionId(order.getId());
+                return vo;
+            }
+        }
+        return streamKnowledge(question, sink);
+    }
+
+    /** 日报流式：当日数据聚合 + flash 润色流式化 */
+    private AiChatVO streamReport(String question, StreamSink sink) {
+        DailyPreviewVO preview = dailyReportService.previewStream(LocalDate.now(), sink);
+        if (preview == null) {
+            return null;
+        }
+        AiChatVO vo = new AiChatVO();
+        vo.setIntent(AiIntent.REPORT.getCode());
+        vo.setAnswer(preview.getContent());
+        vo.setSummary(preview.getSummary());
+        vo.setReportDate(preview.getReportDate());
+        vo.setFallback(preview.getFallback());
+        return vo;
+    }
+
+    /** 概况流式：实时数据聚合 + pro 综合分析流式化 */
+    private AiChatVO streamOverview(String question, StreamSink sink) {
+        String summary = buildOverviewSummary();
+        StringBuilder answer = new StringBuilder();
+        boolean fallback;
+        try {
+            deepSeekClient.chatProStream(OVERVIEW_SYSTEM, "用户问题：" + question + "\n\n工厂实时数据：\n" + summary,
+                    chunk -> {
+                        answer.append(chunk.getContent());
+                        sink.sendDelta(chunk.getContent());
+                    });
+            fallback = false;
+        } catch (AiServiceException e) {
+            if (sink.isCancelled()) {
+                return null;
+            }
+            String text = "【模板回答】AI 服务暂不可用，以下为工厂实时数据：\n\n" + summary;
+            answer.append(text);
+            sink.sendDelta(text);
+            fallback = true;
+        }
+        if (sink.isCancelled()) {
+            return null;
+        }
+        AiChatVO vo = new AiChatVO();
+        vo.setIntent(AiIntent.OVERVIEW.getCode());
+        vo.setAnswer(answer.toString());
+        vo.setSummary(summary);
+        vo.setFallback(fallback);
+        return vo;
+    }
+
+    /** done 事件装配：公共字段必发，路由专属 extras 非空才带 */
+    private Map<String, Object> buildDoneEvent(AiChatVO vo) {
+        Map<String, Object> done = new LinkedHashMap<>();
+        done.put("recordId", vo.getRecordId());
+        done.put("intent", vo.getIntent());
+        done.put("answer", vo.getAnswer());
+        done.put("fallback", Boolean.TRUE.equals(vo.getFallback()));
+        if (vo.getReferences() != null && !vo.getReferences().isEmpty()) {
+            done.put("references", vo.getReferences());
+        }
+        if (vo.getSummary() != null) {
+            done.put("summary", vo.getSummary());
+        }
+        if (vo.getReportDate() != null) {
+            done.put("reportDate", vo.getReportDate().toString());
+        }
+        if (vo.getExceptionId() != null) {
+            done.put("exceptionId", vo.getExceptionId());
+        }
+        return done;
     }
 
     // ------------------------------------------------------------

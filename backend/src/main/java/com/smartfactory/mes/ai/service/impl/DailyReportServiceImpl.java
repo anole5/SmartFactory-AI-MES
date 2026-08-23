@@ -13,6 +13,7 @@ import com.smartfactory.mes.ai.exception.AiServiceException;
 import com.smartfactory.mes.ai.mapper.AiReportMapper;
 import com.smartfactory.mes.ai.mapper.DailyReportMapper;
 import com.smartfactory.mes.ai.service.DailyReportService;
+import com.smartfactory.mes.ai.sse.StreamSink;
 import com.smartfactory.mes.common.api.PageResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,6 +77,54 @@ public class DailyReportServiceImpl extends ServiceImpl<AiReportMapper, MesAiRep
         DailyPreviewVO vo = new DailyPreviewVO();
         vo.setReportDate(reportDate);
         vo.setContent(content);
+        vo.setSummary(summary);
+        vo.setFallback(fallback);
+        return vo;
+    }
+
+    @Override
+    public DailyPreviewVO previewStream(LocalDate reportDate, StreamSink sink) {
+        // 管线与 preview() 一致（聚合零改动），仅 flash 档润色换成流式：delta 逐块推给前端（打字机）。
+        LocalDateTime start = reportDate.atStartOfDay();
+        LocalDateTime end = reportDate.plusDays(1).atStartOfDay();
+
+        long good = dailyReportMapper.sumGood(start, end);
+        long defect = dailyReportMapper.sumDefect(start, end);
+        long reportCount = dailyReportMapper.countReport(start, end);
+        long exceptionCount = dailyReportMapper.countException(start, end);
+        long inspectionCompleted = dailyReportMapper.countInspectionCompleted(start, end);
+        long openException = dailyReportMapper.openExceptionCount();
+        long activeWorkOrders = dailyReportMapper.activeWorkOrderCount();
+        List<EquipmentStatusRow> equipment = dailyReportMapper.equipmentStatusCount();
+
+        String summary = buildSummary(reportDate, good, defect, reportCount, exceptionCount,
+                inspectionCompleted, openException, activeWorkOrders, equipment);
+
+        StringBuilder content = new StringBuilder();
+        boolean fallback;
+        try {
+            deepSeekClient.chatFastStream(SYSTEM_PROMPT, summary,
+                    chunk -> {
+                        content.append(chunk.getContent());
+                        sink.sendDelta(chunk.getContent());
+                    });
+            fallback = false;
+        } catch (AiServiceException e) {
+            if (sink.isCancelled()) {
+                return null;
+            }
+            String text = "【模板日报】AI 服务暂不可用，以下为当日统计数据：\n\n" + summary;
+            content.append(text);
+            sink.sendDelta(text);
+            fallback = true;
+        }
+        if (sink.isCancelled()) {
+            return null;
+        }
+
+        DailyPreviewVO vo = new DailyPreviewVO();
+        vo.setReportDate(reportDate);
+        vo.setContent(content.toString());
         vo.setSummary(summary);
         vo.setFallback(fallback);
         return vo;

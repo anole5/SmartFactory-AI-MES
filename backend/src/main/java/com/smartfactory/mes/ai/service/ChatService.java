@@ -1,6 +1,7 @@
 package com.smartfactory.mes.ai.service;
 
 import com.smartfactory.mes.ai.dto.AiChatVO;
+import com.smartfactory.mes.ai.sse.StreamSink;
 
 /**
  * 统一 AI 助手服务：一句话问全局，意图路由分发四类场景
@@ -9,4 +10,7 @@ public interface ChatService {
 
     /** 对话入口：规则/LLM 意图识别 → 路由分发（概况/知识库/异常/日报）→ 统一出参 */
     AiChatVO chat(String question);
+
+    /** 流式对话：意图识别同 {@link #chat}（先发 meta），再路由到子服务流式方法；客户端停止返回 null 不落记录 */
+    AiChatVO chatStream(String question, StreamSink sink);
 }
