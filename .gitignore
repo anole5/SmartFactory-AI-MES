@@ -9,6 +9,9 @@ backend/target/
 *.jar
 !.mvn/wrapper/maven-wrapper.jar
 
+# 本地敏感配置（真实 DeepSeek API Key，绝不入库）
+backend/src/main/resources/application-local.yml
+
 # 前端（Node）
 frontend/node_modules/
 frontend/dist/

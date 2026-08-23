@@ -52,6 +52,9 @@ public class MesExceptionOrder extends BaseEntity {
     /** 处理结论（关闭时必填） */
     private String resolveRemark;
 
+    /** AI 异常处理建议（第 4 周：建议助手生成，admin/qa 可保存回填） */
+    private String aiSuggestion;
+
     /** 关闭时间 */
     private LocalDateTime resolvedAt;
 }

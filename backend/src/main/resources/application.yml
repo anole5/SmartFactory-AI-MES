@@ -15,9 +15,23 @@ equipment:
     enabled: true
     interval-ms: 15000
 
+# AI 接入（DeepSeek OpenAI 兼容接口）：flash 档做快速问答/意图识别，pro 档做复杂推理
+# api-key 只放环境变量或 gitignored 的 application-local.yml，绝不入库
+ai:
+  deepseek:
+    base-url: https://api.deepseek.com
+    api-key: ${DEEPSEEK_API_KEY:}
+    fast-model: deepseek-v4-flash
+    pro-model: deepseek-v4-pro
+    timeout-seconds: 60
+    max-tokens: 1500
+
 spring:
   application:
     name: smartfactory-mes
+  profiles:
+    # 叠加本地配置：application-local.yml（gitignored，存放真实 DeepSeek Key）
+    include: local
   datasource:
     # 开发环境复用本机 Docker 的 mysql:8.0 容器（尚硅谷课程栈，端口 3306）
     url: jdbc:mysql://localhost:3306/smartfactory_mes?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
