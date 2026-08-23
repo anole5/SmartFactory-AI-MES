@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS mes_external_order (
   product_code_snapshot VARCHAR(64)  NOT NULL                COMMENT '产品编码快照',
   product_name_snapshot VARCHAR(128) NOT NULL                COMMENT '产品名称快照',
   plan_qty              INT          NOT NULL                COMMENT '计划数量',
-  priority              INT          NULL                    COMMENT '优先级（透传工单）',
+  priority              VARCHAR(16)  NULL                    COMMENT '优先级：HIGH/NORMAL/LOW（透传工单）',
   plan_start_time       DATE         NULL                    COMMENT '计划开始日期（透传工单）',
   plan_end_time         DATE         NULL                    COMMENT '计划完成日期（透传工单）',
   status                VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING/SYNCED/DONE',
