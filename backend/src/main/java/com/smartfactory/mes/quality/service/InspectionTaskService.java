@@ -1,6 +1,12 @@
 package com.smartfactory.mes.quality.service;
 
+import com.smartfactory.mes.common.api.PageResult;
 import com.smartfactory.mes.production.entity.MesOperationTask;
+import com.smartfactory.mes.quality.dto.InspectionRecordVO;
+import com.smartfactory.mes.quality.dto.InspectionTaskQueryDTO;
+import com.smartfactory.mes.quality.dto.InspectionTaskVO;
+
+import java.util.List;
 
 /**
  * 质检任务服务
@@ -25,4 +31,16 @@ public interface InspectionTaskService {
      * @return 实际取消数量（用于 CANCEL 追溯明细）
      */
     int cancelByWorkOrder(Long workOrderId);
+
+    /** 质检任务分页列表（工单号/质检员名称批量回填） */
+    PageResult<InspectionTaskVO> page(InspectionTaskQueryDTO query);
+
+    /** 质检任务详情 */
+    InspectionTaskVO getDetail(Long id);
+
+    /** 某质检任务的质检记录列表（按时间升序，质检员名称回填） */
+    List<InspectionRecordVO> listRecords(Long taskId);
+
+    /** 开始检验：PENDING -> INSPECTING（同状态幂等，其余 409），回填质检员与开始时间 */
+    void start(Long taskId);
 }
