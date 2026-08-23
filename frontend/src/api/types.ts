@@ -361,6 +361,8 @@ export interface WorkReportSave {
   startTime?: string
   endTime?: string
   remark?: string
+  /** 关键件批次绑定（第 6 周，可选：报工内嵌绑定，materialId+batchNo） */
+  materialBatchBindings?: MaterialBatchBind[]
 }
 
 export interface WorkReportQuery extends PageQuery {
@@ -556,12 +558,88 @@ export interface SnTrace {
   reportNo?: string
   createdAt?: string
   timeline: TraceRecord[]
+  /** 整机关键件批次使用清单（第 6 周，按物料聚合去重） */
+  materialBatches?: MaterialBatchUsage[]
 }
 
 /** 按批次号追溯结果：批次全部报工 + 涉及工单（去重） */
 export interface BatchTrace {
   reports: WorkReport[]
   workOrders: WorkOrder[]
+}
+
+// ---------- 物料批次（第 6 周） ----------
+export interface MaterialBatch {
+  id: string
+  batchNo: string
+  materialId: string
+  materialCodeSnapshot: string
+  materialNameSnapshot: string
+  batchQty: number
+  usedQty: number
+  /** 剩余数量 = batchQty - usedQty（VO 计算字段） */
+  remainingQty: number
+  inDate?: string
+  supplier?: string
+  remark?: string
+  createdAt?: string
+}
+
+export interface MaterialBatchQuery extends PageQuery {
+  materialId?: string
+  keyword?: string
+}
+
+export interface MaterialBatchSave {
+  materialId: string
+  batchQty: number
+  inDate?: string
+  supplier?: string
+  remark?: string
+}
+
+/** 报工绑定关键件批次入参（{materialId, batchNo}） */
+export interface MaterialBatchBind {
+  materialId: string
+  batchNo: string
+}
+
+/** SN/批次追溯中的关键件批次使用行 */
+export interface MaterialBatchUsage {
+  reportId: string
+  reportNo: string
+  batchId: string
+  batchNo: string
+  materialId: string
+  materialCodeSnapshot: string
+  materialNameSnapshot: string
+  qtyUsed: number
+  createdAt?: string
+}
+
+/** 按物料批次反查：批次主数据 + 绑定报工 + 涉及工单 + 整机 SN */
+export interface BatchSnItem {
+  id: string
+  sn: string
+  workOrderId: string
+  workOrderNo?: string
+  productNameSnapshot?: string
+  createdAt?: string
+}
+
+export interface BatchSnTrace {
+  batchId: string
+  batchNo: string
+  materialId: string
+  materialCodeSnapshot: string
+  materialNameSnapshot: string
+  batchQty: number
+  usedQty: number
+  inDate?: string
+  supplier?: string
+  bindings: MaterialBatchUsage[]
+  workOrders: WorkOrder[]
+  sns: BatchSnItem[]
 }
 
 // ---------- 生产看板（第 3 周） ----------

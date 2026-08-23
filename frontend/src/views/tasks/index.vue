@@ -170,6 +170,27 @@
         <el-form-item label="备注">
           <el-input v-model="reportForm.remark" />
         </el-form-item>
+        <div v-loading="keyBatchLoading">
+          <template v-if="keyBatchRows.length">
+            <el-divider content-position="left">关键件批次（关键件绑定物料批次后可按 SN 反查）</el-divider>
+            <el-form-item v-for="row in keyBatchRows" :key="row.material.id" :label="row.material.materialName">
+              <el-select
+                v-model="row.batchNo"
+                placeholder="选填，批次号（剩余量）"
+                clearable
+                filterable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="b in row.options"
+                  :key="b.id"
+                  :label="`${b.batchNo}（剩 ${b.remainingQty}）`"
+                  :value="b.batchNo"
+                />
+              </el-select>
+            </el-form-item>
+          </template>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="reportVisible = false">取消</el-button>
@@ -183,8 +204,17 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { authApi, reportApi, taskApi, workstationApi } from '@/api'
-import type { OperationTask, TaskAssign, TaskQuery, UserOption, WorkReportSave, Workstation } from '@/api/types'
+import { authApi, materialApi, materialBatchApi, reportApi, taskApi, workstationApi } from '@/api'
+import type {
+  Material,
+  MaterialBatch,
+  OperationTask,
+  TaskAssign,
+  TaskQuery,
+  UserOption,
+  WorkReportSave,
+  Workstation,
+} from '@/api/types'
 import { TASK_STATUS, labelOf, tagTypeOf } from '@/constants/dict'
 
 const loading = ref(false)
@@ -303,6 +333,36 @@ const reportRules: FormRules = {
   defectQty: [{ required: true, message: '请输入不良数量', trigger: 'blur' }],
 }
 
+// ---------- 关键件批次绑定（第 6 周：报工弹窗内嵌绑定，按物料过滤批次下拉） ----------
+interface KeyBatchRow {
+  material: Material
+  options: MaterialBatch[]
+  batchNo: string
+}
+const keyBatchRows = ref<KeyBatchRow[]>([])
+const keyBatchLoading = ref(false)
+
+/** 打开报工弹窗时拉取关键件物料（traceRequired=1）及各自批次下拉（label=batchNo+剩余量） */
+async function loadKeyBatchRows() {
+  keyBatchLoading.value = true
+  try {
+    const page = await materialApi
+      .page({ pageNum: 1, pageSize: 100, status: 'ENABLED' })
+      .catch(() => null)
+    const keyMaterials = (page?.records ?? []).filter((m) => m.traceRequired)
+    keyBatchRows.value = await Promise.all(
+      keyMaterials.map(async (material) => {
+        const batchPage = await materialBatchApi
+          .page({ pageNum: 1, pageSize: 50, materialId: material.id })
+          .catch(() => null)
+        return { material, options: batchPage?.records ?? [], batchNo: '' }
+      }),
+    )
+  } finally {
+    keyBatchLoading.value = false
+  }
+}
+
 function openReport(row: OperationTask) {
   currentTask.value = row
   Object.assign(reportForm, {
@@ -314,6 +374,7 @@ function openReport(row: OperationTask) {
     remark: '',
   })
   reportVisible.value = true
+  loadKeyBatchRows()
 }
 
 async function handleReport() {
@@ -323,12 +384,17 @@ async function handleReport() {
     ElMessage.warning('报工数量必须等于合格数量加不良数量')
     return
   }
+  // 仅携带已选择的关键件批次（后端校验批次存在/物料匹配，失败整单回滚）
+  const bindings = keyBatchRows.value
+    .filter((row) => row.batchNo)
+    .map((row) => ({ materialId: row.material.id, batchNo: row.batchNo }))
   saving.value = true
   try {
     await reportApi.create({
       ...reportForm,
       productBatchNo: reportForm.productBatchNo || undefined,
       remark: reportForm.remark || undefined,
+      materialBatchBindings: bindings.length ? bindings : undefined,
     })
     ElMessage.success('报工成功')
     reportVisible.value = false

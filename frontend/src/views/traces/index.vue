@@ -5,6 +5,7 @@
       <el-radio-group v-model="mode" @change="handleModeChange">
         <el-radio-button value="sn">按 SN 追溯</el-radio-button>
         <el-radio-button value="batch">按批次追溯</el-radio-button>
+        <el-radio-button value="materialBatch">按物料批次反查</el-radio-button>
         <el-radio-button value="workOrder">按工单追溯</el-radio-button>
       </el-radio-group>
       <div class="spacer" />
@@ -46,6 +47,17 @@
           <el-descriptions-item label="出生报工单">{{ snResult.reportNo || '-' }}</el-descriptions-item>
           <el-descriptions-item label="SN 生成时间">{{ snResult.createdAt }}</el-descriptions-item>
         </el-descriptions>
+        <template v-if="snResult.materialBatches?.length">
+          <h4 class="section-title">整机关键件批次（{{ snResult.materialBatches.length }}）</h4>
+          <el-table :data="snResult.materialBatches" stripe border size="small">
+            <el-table-column label="物料" min-width="180">
+              <template #default="{ row }">{{ row.materialCodeSnapshot }} {{ row.materialNameSnapshot }}</template>
+            </el-table-column>
+            <el-table-column prop="batchNo" label="物料批次号" min-width="165" />
+            <el-table-column prop="qtyUsed" label="使用数量" width="90" />
+            <el-table-column prop="reportNo" label="绑定报工单" min-width="150" />
+          </el-table>
+        </template>
       </el-card>
 
       <div class="entry-bar">
@@ -139,6 +151,78 @@
       </template>
     </template>
 
+    <!-- 按物料批次（第 6 周：关键件批次反查整机） -->
+    <template v-else-if="mode === 'materialBatch'">
+      <div class="entry-bar">
+        <el-input
+          v-model="materialBatchInput"
+          placeholder="输入物料批次号，如 MB202608230001"
+          clearable
+          style="width: 260px"
+          @keyup.enter="handleMaterialBatchTrace"
+        />
+        <el-button type="primary" @click="handleMaterialBatchTrace">
+          <el-icon><Search /></el-icon>&nbsp;追溯
+        </el-button>
+        <div class="spacer" />
+        <el-button v-permission="'production:material-batch:create'" type="success" @click="openBatchCreate">
+          <el-icon><Plus /></el-icon>&nbsp;新建批次
+        </el-button>
+      </div>
+
+      <template v-if="materialBatchResult">
+        <el-card class="result-card" shadow="never">
+          <el-descriptions :column="3" border>
+            <el-descriptions-item label="物料批次号">{{ materialBatchResult.batchNo }}</el-descriptions-item>
+            <el-descriptions-item label="物料">
+              {{ materialBatchResult.materialCodeSnapshot }} {{ materialBatchResult.materialNameSnapshot }}
+            </el-descriptions-item>
+            <el-descriptions-item label="批次/已用">
+              {{ materialBatchResult.batchQty }}/{{ materialBatchResult.usedQty }}
+            </el-descriptions-item>
+            <el-descriptions-item label="入库日期">{{ materialBatchResult.inDate || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="供应商">{{ materialBatchResult.supplier || '-' }}</el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <h4 class="section-title">绑定报工记录（{{ materialBatchResult.bindings.length }}）</h4>
+        <el-table :data="materialBatchResult.bindings" stripe border>
+          <el-table-column prop="reportNo" label="报工单号" min-width="150" />
+          <el-table-column label="物料" min-width="200">
+            <template #default="{ row }">{{ row.materialCodeSnapshot }} {{ row.materialNameSnapshot }}</template>
+          </el-table-column>
+          <el-table-column prop="qtyUsed" label="使用数量" width="90" />
+          <el-table-column prop="createdAt" label="绑定时间" width="170" />
+        </el-table>
+
+        <h4 class="section-title">涉及工单（{{ materialBatchResult.workOrders.length }}）</h4>
+        <el-table :data="materialBatchResult.workOrders" stripe border>
+          <el-table-column prop="workOrderNo" label="工单号" min-width="165" />
+          <el-table-column label="产品" min-width="200">
+            <template #default="{ row }">{{ row.productCodeSnapshot }} {{ row.productNameSnapshot }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="tagTypeOf(row.status)" size="small">{{ labelOf(WORK_ORDER_STATUS, row.status) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="traceByWorkOrderId(row.id)">时间线</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h4 class="section-title">使用本批次的整机 SN（{{ materialBatchResult.sns.length }}）</h4>
+        <el-table :data="materialBatchResult.sns" stripe border>
+          <el-table-column prop="sn" label="整机 SN" min-width="180" />
+          <el-table-column prop="workOrderNo" label="工单号" min-width="165" />
+          <el-table-column prop="productNameSnapshot" label="产品" min-width="160" />
+          <el-table-column prop="createdAt" label="生成时间" width="170" />
+        </el-table>
+      </template>
+    </template>
+
     <!-- 按工单 -->
     <template v-else>
       <div class="entry-bar">
@@ -176,10 +260,53 @@
           <el-descriptions-item label="合格/不良">
             {{ workOrderResult.goodQty }}/{{ workOrderResult.defectQty }}
           </el-descriptions-item>
-          <el-descriptions-item label="生产批次号">{{ workOrderResult.externalOrderNo || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="外部订单号">{{ workOrderResult.externalOrderNo || '-' }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
     </template>
+
+    <!-- 新建物料批次弹窗（第 6 周） -->
+    <el-dialog v-model="batchCreateVisible" title="新建物料批次" width="480px" destroy-on-close>
+      <el-form ref="batchCreateFormRef" :model="batchCreateForm" :rules="batchCreateRules" label-width="100px">
+        <el-form-item label="物料" prop="materialId">
+          <el-select
+            v-model="batchCreateForm.materialId"
+            placeholder="选择物料（关键件可绑定追溯）"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="m in materials"
+              :key="m.id"
+              :label="`${m.materialCode} ${m.materialName}${m.traceRequired ? '（关键件）' : ''}`"
+              :value="m.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="批次数量" prop="batchQty">
+          <el-input-number v-model="batchCreateForm.batchQty" :min="1" style="width: 180px" />
+        </el-form-item>
+        <el-form-item label="入库日期">
+          <el-date-picker
+            v-model="batchCreateForm.inDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="默认今天"
+            style="width: 180px"
+          />
+        </el-form-item>
+        <el-form-item label="供应商">
+          <el-input v-model="batchCreateForm.supplier" maxlength="64" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="batchCreateForm.remark" maxlength="255" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchCreateVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="handleBatchCreate">确定创建</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 时间线抽屉 -->
     <el-drawer v-model="timelineVisible" :title="timelineTitle" size="560px">
@@ -204,11 +331,22 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { snApi, traceApi, workOrderApi } from '@/api'
-import type { BatchTrace, Sn, SnQuery, SnTrace, TraceRecord, WorkOrder } from '@/api/types'
+import type { FormInstance, FormRules } from 'element-plus'
+import { materialApi, materialBatchApi, snApi, traceApi, workOrderApi } from '@/api'
+import type {
+  BatchSnTrace,
+  BatchTrace,
+  Material,
+  MaterialBatchSave,
+  Sn,
+  SnQuery,
+  SnTrace,
+  TraceRecord,
+  WorkOrder,
+} from '@/api/types'
 import { ACTION_TYPE, WORK_ORDER_STATUS, labelOf, tagTypeOf } from '@/constants/dict'
 
-type TraceMode = 'sn' | 'batch' | 'workOrder'
+type TraceMode = 'sn' | 'batch' | 'materialBatch' | 'workOrder'
 const mode = ref<TraceMode>('sn')
 
 // ---------- 按 SN ----------
@@ -268,6 +406,68 @@ async function handleBatchTrace() {
     return
   }
   batchResult.value = result
+}
+
+// ---------- 按物料批次（第 6 周：关键件批次反查整机） ----------
+const materialBatchInput = ref('')
+const materialBatchResult = ref<BatchSnTrace | null>(null)
+
+async function handleMaterialBatchTrace() {
+  const batchNo = materialBatchInput.value.trim()
+  if (!batchNo) {
+    ElMessage.warning('请输入物料批次号')
+    return
+  }
+  const result = await traceApi.byMaterialBatch(batchNo).catch(() => null)
+  if (result) materialBatchResult.value = result
+}
+
+// ---------- 新建物料批次 ----------
+const batchCreateVisible = ref(false)
+const batchSaving = ref(false)
+const batchCreateFormRef = ref<FormInstance>()
+const materials = ref<Material[]>([])
+const batchCreateForm = reactive<MaterialBatchSave>({
+  materialId: '',
+  batchQty: 100,
+  inDate: '',
+  supplier: '',
+  remark: '',
+})
+
+const batchCreateRules: FormRules = {
+  materialId: [{ required: true, message: '请选择物料', trigger: 'change' }],
+  batchQty: [{ required: true, message: '请输入批次数量', trigger: 'blur' }],
+}
+
+async function openBatchCreate() {
+  if (!materials.value.length) {
+    const page = await materialApi
+      .page({ pageNum: 1, pageSize: 100, status: 'ENABLED' })
+      .catch(() => null)
+    if (page) materials.value = page.records
+  }
+  Object.assign(batchCreateForm, { materialId: '', batchQty: 100, inDate: '', supplier: '', remark: '' })
+  batchCreateVisible.value = true
+}
+
+async function handleBatchCreate() {
+  const valid = await batchCreateFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  batchSaving.value = true
+  try {
+    await materialBatchApi.create({
+      materialId: batchCreateForm.materialId,
+      batchQty: batchCreateForm.batchQty,
+      inDate: batchCreateForm.inDate || undefined,
+      supplier: batchCreateForm.supplier || undefined,
+      remark: batchCreateForm.remark || undefined,
+    })
+    ElMessage.success('批次创建成功')
+    batchCreateVisible.value = false
+  } finally {
+    batchSaving.value = false
+  }
 }
 
 // ---------- 按工单 ----------

@@ -4,6 +4,7 @@ import type {
   AiAskResult,
   AiChatResult,
   BatchTrace,
+  BatchSnTrace,
   Bom,
   BomQuery,
   BomSave,
@@ -38,6 +39,10 @@ import type {
   KnowledgeDocSave,
   LoginResult,
   Material,
+  MaterialBatch,
+  MaterialBatchBind,
+  MaterialBatchQuery,
+  MaterialBatchSave,
   MaterialQuery,
   MaterialSave,
   MenuNode,
@@ -108,6 +113,9 @@ export const taskApi = {
 export const reportApi = {
   page: (params: WorkReportQuery) => httpGet<PageResult<WorkReport>>('/production/reports/page', params),
   create: (data: WorkReportSave) => httpPost<void>('/production/reports', data),
+  /** 补录关键件批次绑定（第 6 周，报工后漏绑补录） */
+  bindBatches: (reportId: string, items: MaterialBatchBind[]) =>
+    httpPost<void>(`/production/reports/${reportId}/bind-batch`, { items }),
 }
 
 // ---------- 追溯 ----------
@@ -116,6 +124,8 @@ export const traceApi = {
     httpGet<TraceRecord[]>('/production/traces', { workOrderId }),
   bySn: (sn: string) => httpGet<SnTrace>('/production/traces/sn', { sn }),
   byBatch: (batchNo: string) => httpGet<BatchTrace>('/production/traces/batch', { batchNo }),
+  /** 按物料批次反查（第 6 周：批次主数据 + 绑定报工 + 工单 + SN） */
+  byMaterialBatch: (batchNo: string) => httpGet<BatchSnTrace>('/production/traces/batch-sns', { batchNo }),
 }
 
 // ---------- 整机 SN（第 3 周） ----------
@@ -143,6 +153,13 @@ export const materialApi = {
   changeStatus: (id: string, status: string) =>
     httpPut<void>(`/master/materials/${id}/status`, { status }),
   remove: (id: string) => httpDelete<void>(`/master/materials/${id}`),
+}
+
+// ---------- 物料批次（第 6 周） ----------
+export const materialBatchApi = {
+  page: (params: MaterialBatchQuery) =>
+    httpGet<PageResult<MaterialBatch>>('/production/material-batches/page', params),
+  create: (data: MaterialBatchSave) => httpPost<string>('/production/material-batches', data),
 }
 
 // ---------- 工序 ----------

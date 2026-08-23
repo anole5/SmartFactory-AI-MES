@@ -65,6 +65,10 @@ export const ACTION_TYPE: Record<string, string> = {
   EXCEPTION_CREATE: '创建异常单',
   EXCEPTION_PROCESS: '处理异常',
   EXCEPTION_CLOSE: '关闭异常',
+  AI_SUGGEST: 'AI 处理建议回写',
+  BATCH_BIND: '关键件批次绑定',
+  ERP_DONE: '工单完工回传 ERP',
+  WMS_FINISHED_IN: '成品完工入库',
 }
 
 /** 质检任务状态机（第 3 周） */

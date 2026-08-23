@@ -3,7 +3,7 @@
 // 本脚本拉真实 /auth/menus 菜单树，校验：
 // 1) 每个角色菜单树的 C 级 path 都能在 frontend/src/views{path}/index.vue 找到真实文件
 //    （菜单路径与视图文件契约不破，动态注册必成功）
-// 2) admin 覆盖全部 21 个页面；operator 无 /erp-orders /inventory（角色差异=菜单差异）
+// 2) admin 覆盖全部 24 个页面；operator 无 /erp-orders /inventory（角色差异=菜单差异）
 // 3) 404 兜底页存在（守卫注册 catch-all 的组件）
 // 运行：node scripts/verify-t5-dynamic.mjs（后端须在跑，且已加载 T4 /auth/menus）
 
@@ -52,6 +52,7 @@ const ALL_PAGES = [
   '/inspection-tasks', '/defects', '/exceptions',
   '/ai-chat', '/knowledge', '/ai-assistant', '/ai-daily',
   '/erp-orders', '/inventory', '/tv-demo',
+  '/scheduling', '/reports-center',
 ]
 
 const admin = await login('admin', 'admin123')
@@ -61,7 +62,7 @@ ok('admin/operator 登录成功', !!admin.data?.token && !!operator.data?.token)
 const aPaths = pathsOf(await menus(admin.data.token))
 const oPaths = pathsOf(await menus(operator.data.token))
 
-ok('admin 菜单树覆盖全部 21 个页面路径', ALL_PAGES.every(p => aPaths.includes(p)),
+ok('admin 菜单树覆盖全部 24 个页面路径', ALL_PAGES.every(p => aPaths.includes(p)),
   `missing=${ALL_PAGES.filter(p => !aPaths.includes(p)).join(',')}`)
 ok('operator 菜单树无 /erp-orders 与 /inventory（动态菜单角色差异）',
   !oPaths.includes('/erp-orders') && !oPaths.includes('/inventory'),
