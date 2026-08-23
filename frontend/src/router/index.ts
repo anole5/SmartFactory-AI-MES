@@ -134,6 +134,18 @@ const router = createRouter({
           component: () => import('@/views/tv-demo/index.vue'),
           meta: { title: '电视 Demo' },
         },
+        {
+          path: 'erp-orders',
+          name: 'erp-orders',
+          component: () => import('@/views/erp-orders/index.vue'),
+          meta: { title: 'ERP 订单' },
+        },
+        {
+          path: 'inventory',
+          name: 'inventory',
+          component: () => import('@/views/inventory/index.vue'),
+          meta: { title: 'WMS 库存' },
+        },
       ],
     },
   ],

@@ -132,6 +132,10 @@ export const STATUS_TAG_TYPE: Record<string, 'success' | 'info' | 'warning' | 'd
   IDLE: 'info',
   STOPPED: 'danger',
   MAINTENANCE: 'warning',
+  SYNCED: 'warning',
+  DONE: 'success',
+  IN: 'success',
+  OUT: 'warning',
 }
 
 /** 字典取值（找不到时原样返回，避免字典漏配时页面空白） */
@@ -163,4 +167,30 @@ export const AI_INTENT: Record<string, string> = {
   KNOWLEDGE: '知识库',
   EXCEPTION: '异常建议',
   REPORT: '生产日报',
+}
+
+/** 外部订单状态机（第 5 周 ERP 集成） */
+export const EXTERNAL_ORDER_STATUS: Record<string, string> = {
+  PENDING: '待转工单',
+  SYNCED: '已转工单',
+  DONE: '已完成',
+}
+
+/** 库存条目类型（第 5 周 WMS） */
+export const ITEM_TYPE: Record<string, string> = {
+  MATERIAL: '物料',
+  FINISHED: '成品',
+}
+
+/** 库存流水方向（第 5 周 WMS） */
+export const STOCK_TX_TYPE: Record<string, string> = {
+  IN: '入库',
+  OUT: '出库',
+}
+
+/** 库存业务类型（第 5 周 WMS） */
+export const STOCK_BIZ_TYPE: Record<string, string> = {
+  PURCHASE_IN: '采购入库',
+  PICK_OUT: '工单领料',
+  FINISHED_IN: '完工入库',
 }

@@ -709,3 +709,95 @@ export interface DailyReportSave {
 export interface DailyReportQuery extends PageQuery {
   reportDate?: string
 }
+
+// ---------- 系统集成：ERP 外部订单（第 5 周） ----------
+export interface ErpOrder {
+  id: string
+  externalOrderNo: string
+  productId: string
+  productCodeSnapshot: string
+  productNameSnapshot: string
+  planQty: number
+  priority: string
+  planStartTime?: string
+  planEndTime?: string
+  status: string
+  workOrderId?: string
+  remark?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ErpOrderQuery extends PageQuery {
+  keyword?: string
+  status?: string
+}
+
+/** 模拟下单入参（planStartTime/planEndTime 为 yyyy-MM-dd） */
+export interface ErpOrderSave {
+  productId: string
+  planQty: number
+  priority?: string
+  planStartTime?: string
+  planEndTime?: string
+  remark?: string
+}
+
+// ---------- 系统集成：WMS 库存（第 5 周） ----------
+export interface InventoryItem {
+  id: string
+  itemType: string
+  itemRefId: string
+  itemCode?: string
+  itemName?: string
+  unit?: string
+  qty: number
+  remark?: string
+  updatedAt?: string
+}
+
+export interface InventoryQuery extends PageQuery {
+  itemType?: string
+  keyword?: string
+}
+
+export interface StockInSave {
+  materialId: string
+  qty: number
+  remark?: string
+}
+
+export interface StockTx {
+  id: string
+  txNo: string
+  txType: string
+  itemType: string
+  itemRefId: string
+  itemCode?: string
+  itemName?: string
+  qty: number
+  bizType: string
+  workOrderId?: string
+  remark?: string
+  createdAt?: string
+}
+
+export interface StockTxQuery extends PageQuery {
+  workOrderId?: string
+  itemType?: string
+  bizType?: string
+}
+
+export interface PickItem {
+  materialId: string
+  materialCode: string
+  materialName: string
+  needQty: number
+  actualPickedQty: number
+}
+
+export interface PickResult {
+  workOrderId: string
+  workOrderNo: string
+  items: PickItem[]
+}

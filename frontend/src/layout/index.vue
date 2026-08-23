@@ -77,6 +77,17 @@
         <el-menu-item index="/traces">
           <el-icon><Search /></el-icon><span>追溯查询</span>
         </el-menu-item>
+        <el-sub-menu index="integration">
+          <template #title>
+            <el-icon><Link /></el-icon><span>系统集成</span>
+          </template>
+          <el-menu-item index="/erp-orders">
+            <el-icon><ShoppingCart /></el-icon><span>ERP 订单</span>
+          </el-menu-item>
+          <el-menu-item index="/inventory">
+            <el-icon><OfficeBuilding /></el-icon><span>WMS 库存</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/dashboard">
           <el-icon><DataAnalysis /></el-icon><span>生产看板</span>
         </el-menu-item>

@@ -20,6 +20,9 @@ import type {
   Equipment,
   EquipmentQuery,
   EquipmentSave,
+  ErpOrder,
+  ErpOrderQuery,
+  ErpOrderSave,
   ExceptionOrder,
   ExceptionQuery,
   ExceptionSave,
@@ -28,6 +31,8 @@ import type {
   InspectionRecordSave,
   InspectionTask,
   InspectionTaskQuery,
+  InventoryItem,
+  InventoryQuery,
   KnowledgeDoc,
   KnowledgeDocQuery,
   KnowledgeDocSave,
@@ -37,6 +42,7 @@ import type {
   MaterialSave,
   OperationTask,
   PageResult,
+  PickResult,
   Process,
   ProcessQuery,
   ProcessSave,
@@ -49,6 +55,9 @@ import type {
   Sn,
   SnQuery,
   SnTrace,
+  StockInSave,
+  StockTx,
+  StockTxQuery,
   TaskAssign,
   TaskQuery,
   TraceRecord,
@@ -253,4 +262,22 @@ export const dailyApi = {
   page: (params: DailyReportQuery) => httpGet<PageResult<DailyReport>>('/ai/daily/page', params),
   preview: (reportDate: string) => httpPost<DailyPreview>('/ai/daily/preview', { reportDate }),
   save: (data: DailyReportSave) => httpPost<void>('/ai/daily/save', data),
+}
+
+// ---------- 系统集成：ERP 外部订单（第 5 周） ----------
+export const erpOrderApi = {
+  page: (params: ErpOrderQuery) =>
+    httpGet<PageResult<ErpOrder>>('/integration/erp/orders/page', params),
+  create: (data: ErpOrderSave) => httpPost<string>('/integration/erp/orders', data),
+  toWorkOrder: (id: string) => httpPut<void>(`/integration/erp/orders/${id}/to-work-order`),
+}
+
+// ---------- 系统集成：WMS 库存（第 5 周） ----------
+export const wmsApi = {
+  inventoryPage: (params: InventoryQuery) =>
+    httpGet<PageResult<InventoryItem>>('/integration/wms/inventory/page', params),
+  txPage: (params: StockTxQuery) =>
+    httpGet<PageResult<StockTx>>('/integration/wms/transactions/page', params),
+  stockIn: (data: StockInSave) => httpPost<void>('/integration/wms/stock-in', data),
+  pick: (workOrderId: string) => httpPost<PickResult>('/integration/wms/pick', { workOrderId }),
 }
