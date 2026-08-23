@@ -116,9 +116,9 @@ export const taskApi = {
 export const reportApi = {
   page: (params: WorkReportQuery) => httpGet<PageResult<WorkReport>>('/production/reports/page', params),
   create: (data: WorkReportSave) => httpPost<void>('/production/reports', data),
-  /** 补录关键件批次绑定（第 6 周，报工后漏绑补录） */
+  /** 补录关键件批次绑定（第 6 周，报工后漏绑补录；body 为裸数组 List<MaterialBatchBindDTO>） */
   bindBatches: (reportId: string, items: MaterialBatchBind[]) =>
-    httpPost<void>(`/production/reports/${reportId}/bind-batch`, { items }),
+    httpPost<void>(`/production/reports/${reportId}/bind-batch`, items),
 }
 
 // ---------- 追溯 ----------

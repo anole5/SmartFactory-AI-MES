@@ -3,7 +3,8 @@
 //   → 第 3 周质量链路（质检任务/检验录入/不良/异常）+ SN 追溯 + 批次追溯 + 生产看板
 //   → 第 4 周 AI（知识库 RAG/统一助手四意图/异常建议/生产日报 + 权限边界）
 //   → 第 5 周系统集成（ERP 外单 5 台全链 + WMS 领料/成品入库 + 菜单树角色差异）
-// 前置条件：干净库重放 00→10 后运行（种子产品 3 条等断言依赖干净状态）
+//   → 第 6 周生产深化（物料批次追溯 + 生产排程甘特图 + 报表中心）
+// 前置条件：干净库重放 00→12 后运行（种子产品 3 条等断言依赖干净状态）
 // 运行后清理：Git Bash 执行 scripts/clean-smoke.sql 回到种子状态
 const BASE = 'http://localhost:8080/api';
 let pass = 0, fail = 0;
@@ -730,6 +731,130 @@ let extTaskIds = [];
   const m2paths = walk(m2.json?.data ?? [], []);
   check('planning 菜单树含 /erp-orders /inventory',
     m2paths.includes('/erp-orders') && m2paths.includes('/inventory'), m2paths.join(','));
+}
+
+// ------------------------------------------------------------
+// 18. 第 6 周生产深化：物料批次追溯（列表/新建/补录绑定/正反向反查）+ 排程（run/gantt/幂等）+ 报表中心（summary/export/权限）
+// ------------------------------------------------------------
+let schedWoId = null;
+{
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const _d = new Date();
+  const TODAY = `${_d.getFullYear()}-${pad2(_d.getMonth() + 1)}-${pad2(_d.getDate())}`;
+
+  // 18.1 批次主数据：种子 12 批 + 新建（MB 生成器）
+  const b1 = await req('GET', '/production/material-batches/page?pageNum=1&pageSize=50', null, PLANNING_TOKEN);
+  check('批次列表种子 12 批', String(b1.json?.data?.total) === '12',
+    `total=${b1.json?.data?.total}`);
+  const b2 = await req('POST', '/production/material-batches',
+    { materialId: 2, batchQty: 50, supplier: '冒烟供应商' }, PLANNING_TOKEN);
+  const b2b = await req('GET', '/production/material-batches/page?pageNum=1&pageSize=50&materialId=2',
+    null, PLANNING_TOKEN);
+  const newBatch = (b2b.json?.data?.records ?? []).find(x => x.supplier === '冒烟供应商');
+  check('新建批次 200 + MB 流水号（MB+日期+4位，创建返回 id，批号回查列表）',
+    b2.status === 200 && /^MB\d{12}$/.test(newBatch?.batchNo ?? ''),
+    `id=${b2.json?.data} batchNo=${newBatch?.batchNo}`);
+  const b3 = await req('GET', '/production/material-batches/page?pageNum=1&pageSize=50', null, PLANNING_TOKEN);
+  check('新建后批次列表 13 批', String(b3.json?.data?.total) === '13',
+    `total=${b3.json?.data?.total}`);
+
+  // 18.2 补录绑定：对 17 节完成工单第一道报工补录（先不匹配 409 再成功 + 幂等重放）
+  const rp1 = await req('GET', `/production/reports/page?pageNum=1&pageSize=50&workOrderId=${extWoId}`,
+    null, PLANNING_TOKEN);
+  const firstReportId = rp1.json?.data?.records?.[0]?.id;
+  const bNeg = await req('POST', `/production/reports/${firstReportId}/bind-batch`,
+    [{ materialId: 1, batchNo: 'MB202608230003' }], OPERATOR_TOKEN);
+  check('补录绑定负例：批次与物料不匹配 -> 409', bNeg.status === 409, `status=${bNeg.status}`);
+  const bOk = await req('POST', `/production/reports/${firstReportId}/bind-batch`,
+    [{ materialId: 1, batchNo: 'MB202608230001' }], OPERATOR_TOKEN);
+  check('补录绑定成功 -> 200', bOk.status === 200 && bOk.json?.code === 0,
+    JSON.stringify(bOk.json)?.slice(0, 150));
+  const bIdem = await req('POST', `/production/reports/${firstReportId}/bind-batch`,
+    [{ materialId: 1, batchNo: 'MB202608230001' }], OPERATOR_TOKEN);
+  check('同批重放补录幂等 -> 200', bIdem.status === 200, `status=${bIdem.status}`);
+
+  // 18.3 批次反向追溯：绑定记录 + 5 台 SN；SN 正查 materialBatches 含该批次；批次不存在 404
+  const bs = await req('GET', '/production/traces/batch-sns?batchNo=MB202608230001', null, PLANNING_TOKEN);
+  const bsData = bs.json?.data ?? {};
+  check('batch-sns 反向：含补录报工绑定 + 5 台整机 SN',
+    (bsData.bindings ?? []).some(x => String(x.reportId) === String(firstReportId))
+      && (bsData.sns ?? []).length === 5,
+    `bindings=${bsData.bindings?.length} sns=${bsData.sns?.length}`);
+  const firstSn = bsData.sns?.[0]?.sn;
+  const snT = await req('GET', `/production/traces/sn?sn=${firstSn}`, null, PLANNING_TOKEN);
+  const snBatches = snT.json?.data?.materialBatches ?? [];
+  check('SN 正查：materialBatches 含绑定批次（6 料聚合）',
+    snBatches.some(x => x.batchNo === 'MB202608230001') && snBatches.length > 0,
+    JSON.stringify(snBatches.map(x => `${x.materialId}:${x.batchNo}`)));
+  const bs404 = await req('GET', '/production/traces/batch-sns?batchNo=MB209901010001', null, PLANNING_TOKEN);
+  check('batch-sns 批次不存在 -> 404', bs404.status === 404, `status=${bs404.status}`);
+
+  // 18.4 排程：建单+下发（不做派工/开工/报工）→ run → gantt 13 条不重叠 + AGING 时长 + 重跑幂等
+  const w1 = await req('POST', '/production/work-orders',
+    { productId: 1, planQty: 1, priority: 'NORMAL', remark: '冒烟第 6 周排程' }, PLANNING_TOKEN);
+  schedWoId = w1.json?.data;
+  check('排程验证建单 200', w1.status === 200, `id=${schedWoId}`);
+  const w2 = await req('POST', `/production/work-orders/${schedWoId}/release`, {}, ADMIN_TOKEN);
+  check('排程验证下发 200', w2.json?.code === 0, JSON.stringify(w2.json)?.slice(0, 150));
+  const s1 = await req('POST', '/production/schedule/run', {}, PLANNING_TOKEN);
+  check('planning 执行排程 200（覆盖 13 道任务）',
+    s1.status === 200 && Number(s1.json?.data?.taskCount) === 13,
+    JSON.stringify(s1.json?.data));
+  const g1 = await req('GET', `/production/schedule/gantt?date=${TODAY}`, null, PLANNING_TOKEN);
+  const mine = (g1.json?.data ?? []).filter(t => String(t.workOrderId) === String(schedWoId));
+  check('gantt 本单 13 条（计划时间/工位/逾期字段回填）',
+    mine.length === 13 && mine.every(t => t.planStartTime && t.planEndTime && typeof t.isOverdue === 'boolean'),
+    `mine=${mine.length}`);
+  const wsMap = new Map();
+  for (const t of mine) {
+    const k = t.workstationName || '未分配工位';
+    if (!wsMap.has(k)) wsMap.set(k, []);
+    wsMap.get(k).push(t);
+  }
+  const serial = [...wsMap.values()].every(g => {
+    const s = [...g].sort((a, b) => (a.planStartTime < b.planStartTime ? -1 : 1));
+    return s.every((t, i) => i === 0 || s[i - 1].planEndTime <= t.planStartTime);
+  });
+  check('gantt 同工位串行不重叠（含跨工单）', serial, `工位组=${wsMap.size}`);
+  const aging = mine.find(t => t.processNameSnapshot === '老化测试');
+  const agingMs = aging
+    ? Date.parse(aging.planEndTime.replace(' ', 'T')) - Date.parse(aging.planStartTime.replace(' ', 'T'))
+    : -1;
+  check('AGING 任务计划时长 = 标准工时 120 分钟 × 1 台', agingMs === 7200000, `ms=${agingMs}`);
+  const s2 = await req('POST', '/production/schedule/run', {}, PLANNING_TOKEN);
+  const g2 = await req('GET', `/production/schedule/gantt?date=${TODAY}`, null, PLANNING_TOKEN);
+  const mine2 = (g2.json?.data ?? []).filter(t => String(t.workOrderId) === String(schedWoId));
+  const idem = mine2.every(t => {
+    const prev = mine.find(o => String(o.taskId) === String(t.taskId));
+    return prev && prev.planStartTime === t.planStartTime && prev.planEndTime === t.planEndTime;
+  });
+  check('重跑排程幂等：计划时间完全一致', idem && mine2.length === 13, `mine2=${mine2.length}`);
+
+  // 18.5 报表中心：day 总量 ≥ 15（7 节 10 台 + 17 节 5 台）+ export 魔数 + 权限边界
+  const sum = await req('GET', `/production/reports-center/summary?type=day&date=${TODAY}`, null, PLANNING_TOKEN);
+  const sumData = sum.json?.data ?? {};
+  check('报表中心 day 汇总：合格 ≥ 15、报工数 ≥ 26、良率一致',
+    Number(sumData.totalGoodQty) >= 15 && Number(sumData.reportCount) >= 26
+      && Number(sumData.yieldRate) >= 0,
+    JSON.stringify({ good: sumData.totalGoodQty, reports: sumData.reportCount, yield: sumData.yieldRate }));
+  const expRaw = await fetch(`${BASE}/production/reports-center/export?type=day&date=${TODAY}`, {
+    headers: { Authorization: `Bearer ${PLANNING_TOKEN}` },
+  });
+  const expBuf = Buffer.from(await expRaw.arrayBuffer());
+  check('export 200 + xlsx PK 魔数（zip 容器）',
+    expRaw.status === 200 && expBuf[0] === 0x50 && expBuf[1] === 0x4B,
+    `status=${expRaw.status} bytes=${expBuf.length}`);
+  const opRun = await req('POST', '/production/schedule/run', {}, OPERATOR_TOKEN);
+  check('operator 执行排程 -> 403', opRun.status === 403, `status=${opRun.status}`);
+  const opExp = await fetch(`${BASE}/production/reports-center/export?type=day`, {
+    headers: { Authorization: `Bearer ${OPERATOR_TOKEN}` },
+  });
+  check('operator 导出报表 -> 403', opExp.status === 403, `status=${opExp.status}`);
+
+  // 18.6 收尾：取消排程验证工单（批次/绑定行留给 clean-smoke 清理）
+  const c1 = await req('PUT', `/production/work-orders/${schedWoId}/cancel`, {}, PLANNING_TOKEN);
+  check('取消排程验证工单 200', c1.status === 200 && c1.json?.code === 0,
+    JSON.stringify(c1.json)?.slice(0, 150));
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
