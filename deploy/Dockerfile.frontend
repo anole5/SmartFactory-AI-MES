@@ -1,0 +1,7 @@
+# 受限网络退化方案（单阶段）：宿主机 dist 产物 + nginx，构建期零网络下载
+# 前提：宿主机执行过  cd frontend && npm run build
+# 配合 docker-compose.override.example.yml 使用（build context = 仓库根目录）
+FROM nginx:alpine
+COPY frontend/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

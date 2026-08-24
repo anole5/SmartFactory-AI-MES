@@ -1,5 +1,6 @@
 // 轮询后端就绪（登录接口返回 200 即认为启动完成）
-const res = await fetch('http://localhost:8080/api/auth/login', {
+const BASE = process.env.SMOKE_BASE || 'http://localhost:8080/api';
+const res = await fetch(BASE + '/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ username: 'admin', password: 'admin123' }),

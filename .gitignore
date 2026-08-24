@@ -11,6 +11,10 @@ backend/target/
 
 # 本地敏感配置（真实 DeepSeek API Key，绝不入库）
 backend/src/main/resources/application-local.yml
+# 第 8 周：compose 本地环境（可含真实 DeepSeek Key，绝不入库）
+.env
+# 本机退化构建覆盖（参考 docker-compose.override.example.yml）
+docker-compose.override.yml
 
 # 前端（Node）
 frontend/node_modules/

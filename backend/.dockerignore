@@ -1,0 +1,6 @@
+# 构建上下文排除（镜像只含源码与 pom，产物在镜像内重新构建）
+target
+.idea
+*.iml
+# 本地敏感配置：真实 DeepSeek Key 只在本机，绝不打进镜像
+src/main/resources/application-local.yml

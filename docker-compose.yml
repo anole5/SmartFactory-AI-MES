@@ -1,0 +1,77 @@
+# 第 8 周：一键启动 MES 全栈（mysql + backend + frontend）
+# 宿主端口避开本机已占用的 3306/8080/8081/6333 → 3307/8082/8090
+# 用法：docker compose up -d --build   （.env 可选配 DEEPSEEK_API_KEY，gitignored）
+# 说明：mysql 首启自动按字母序执行 ./sql 的 00→14 初始化脚本（自带 USE smartfactory_mes）
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mes-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: Atguigu.123
+      TZ: Asia/Shanghai
+      # 坑：官方镜像默认无 LANG，initdb 导入中文 SQL 时客户端按 latin1 编码双重转换成乱码；
+      # 必须显式 C.UTF-8 让 mysql 客户端以 UTF-8 读取初始化脚本
+      LANG: C.UTF-8
+    ports:
+      - "3307:3306"
+    volumes:
+      - mes-mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # 初始化期间临时 mysqld 只监听 socket，TCP ping 失败 → backend 等初始化完成再启动
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pAtguigu.123"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        # 受限网络可选（.env，见各 Dockerfile 注释；官方源正常的环境留空）
+        BUILD_PROXY_URL: ${BUILD_PROXY_URL:-}
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-}
+    container_name: mes-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # Spring 环境变量原生覆盖 yml（无需改代码）：连容器内 mysql
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/smartfactory_mes?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
+      SPRING_DATASOURCE_USERNAME: smartfactory
+      SPRING_DATASOURCE_PASSWORD: Smartfactory@123
+      # 向量 RAG 复用宿主机 qdrant/TEI（host-gateway 只读复用，不另起容器）；
+      # 两服务不可用时召回自动退化关键词通道
+      AI_EMBEDDING_BASE_URL: http://host.docker.internal:8081
+      AI_QDRANT_BASE_URL: http://host.docker.internal:6333
+      # DeepSeek Key 从 .env 透传（gitignored，不填则 AI 走模板降级）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      TZ: Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8082:8080"
+    healthcheck:
+      # jre 镜像无 curl：外层 sh 调 bash，用内置 /dev/tcp 探测端口
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # 受限网络可选（.env，见各 Dockerfile 注释；官方源正常的环境留空）
+        BUILD_PROXY_URL: ${BUILD_PROXY_URL:-}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+    container_name: mes-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8090:80"
+
+volumes:
+  mes-mysql-data:

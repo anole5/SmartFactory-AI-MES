@@ -1,0 +1,8 @@
+# 受限网络退化方案（单阶段）：宿主机构建产物直接打包，构建期零网络下载
+# 前提：宿主机执行过  cd backend && ./mvn.cmd -DskipTests package
+# 配合 docker-compose.override.example.yml 使用（build context = 仓库根目录）
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY backend/target/smartfactory-mes-backend-0.1.0.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]

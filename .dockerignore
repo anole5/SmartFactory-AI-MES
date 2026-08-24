@@ -1,0 +1,11 @@
+# 仓库根目录构建上下文排除（仅 deploy/ 单阶段退化方案用 root 上下文，
+# 常规 compose 构建的上下文是 backend/ 与 frontend/，各自有自己的 .dockerignore）
+.git
+.idea
+.vscode
+**/node_modules
+**/.vite
+# target 只把产物 jar 带进上下文，其余构建中间物排除
+backend/target/*
+!backend/target/*.jar
+*.log

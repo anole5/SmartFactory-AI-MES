@@ -1,0 +1,16 @@
+# 受限网络退化方案（示例，不自动生效）
+# 用法：复制本文件为 docker-compose.override.yml（gitignored），再 docker compose up -d --build
+# 效果：backend/frontend 改用 deploy/ 下的单阶段 Dockerfile，构建期零网络下载
+# 前提：宿主机已产出产物——
+#   backend:  cd backend && ./mvn.cmd -DskipTests package
+#   frontend: cd frontend && npm run build
+# 网络正常的环境直接使用默认多阶段构建（backend/Dockerfile、frontend/Dockerfile），无需本文件。
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend

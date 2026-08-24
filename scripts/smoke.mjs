@@ -7,7 +7,8 @@
 //   → 第 7 周 AI 进阶（SSE 流式四端点事件契约 + 向量 RAG reindex/语义召回 + AI 周报趋势/环比/类型隔离）
 // 前置条件：干净库重放 00→12 后运行（种子产品 3 条等断言依赖干净状态）
 // 运行后清理：Git Bash 执行 scripts/clean-smoke.sql 回到种子状态
-const BASE = 'http://localhost:8080/api';
+// 第 8 周：SMOKE_BASE 可覆盖基址（compose 冒烟打 8082）；默认本机 8080 行为零变化
+const BASE = process.env.SMOKE_BASE || 'http://localhost:8080/api';
 let pass = 0, fail = 0;
 let ADMIN_TOKEN = null;
 let OPERATOR_TOKEN = null;
