@@ -101,6 +101,13 @@
             <artifactId>easyexcel</artifactId>
             <version>4.0.3</version>
         </dependency>
+
+        <!-- 单元测试（第 8 周）：JUnit 5 + Mockito + spring-test，版本由 Boot parent 管理 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
