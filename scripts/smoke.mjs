@@ -10,6 +10,10 @@
 // 第 8 周：SMOKE_BASE 可覆盖基址（compose 冒烟打 8082）；默认本机 8080 行为零变化
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8080/api';
 let pass = 0, fail = 0;
+// 第 8 周：SMOKE_SKIP_AI=1 跳过依赖 AI 服务的断言（CI 无 DeepSeek/qdrant/TEI 环境用）；
+// 默认不跳过，201 断言零变化。跳过项不计入 pass/fail
+const SKIP_AI = process.env.SMOKE_SKIP_AI === '1';
+let skipped = 0;
 let ADMIN_TOKEN = null;
 let OPERATOR_TOKEN = null;
 let PLANNING_TOKEN = null;
@@ -34,6 +38,10 @@ async function req(method, path, body, token) {
 function check(name, cond, detail) {
   if (cond) { pass++; console.log(`  PASS  ${name}`); }
   else { fail++; console.log(`  FAIL  ${name}  => ${detail}`); }
+}
+
+function skipCheck(name) {
+  skipped++; console.log(`  -  ${name}（SMOKE_SKIP_AI 跳过）`);
 }
 
 // ------------------------------------------------------------
@@ -595,9 +603,13 @@ let taskIds = [];
   const exceptionId = ex.json?.data;
   check('qa 创建异常单 200', ex.status === 200 && !!exceptionId, `id=${exceptionId}`);
   const sg = await req('POST', '/ai/assistant/suggest', { exceptionId }, QA_TOKEN);
-  check('异常建议生成 200 且非模板降级（pro 推理）',
-    sg.status === 200 && String(sg.json?.data?.suggestion ?? '').length > 50 && sg.json?.data?.fallback === false,
-    `len=${sg.json?.data?.suggestion?.length}`);
+  if (SKIP_AI) {
+    skipCheck('异常建议生成 200 且非模板降级（pro 推理）');
+  } else {
+    check('异常建议生成 200 且非模板降级（pro 推理）',
+      sg.status === 200 && String(sg.json?.data?.suggestion ?? '').length > 50 && sg.json?.data?.fallback === false,
+      `len=${sg.json?.data?.suggestion?.length}`);
+  }
   const s1 = await req('POST', '/ai/assistant/save', { exceptionId, suggestion: sg.json?.data?.suggestion }, QA_TOKEN);
   const s2 = await req('POST', '/ai/assistant/save', { exceptionId, suggestion: '越权保存' }, OPERATOR_TOKEN);
   check('qa 保存建议 200 / operator 保存建议 403', s1.status === 200 && s2.status === 403,
@@ -609,9 +621,13 @@ let taskIds = [];
   // 16.5 生产日报：预览（flash 润色）→ 保存 → 同日幂等
   const today = new Date().toISOString().slice(0, 10);
   const pv = await req('POST', '/ai/daily/preview', { reportDate: today }, OPERATOR_TOKEN);
-  check('日报预览 200 且正文非空',
-    pv.status === 200 && String(pv.json?.data?.content ?? '').length > 20 && pv.json?.data?.fallback === false,
-    `len=${pv.json?.data?.content?.length}`);
+  if (SKIP_AI) {
+    skipCheck('日报预览 200 且正文非空');
+  } else {
+    check('日报预览 200 且正文非空',
+      pv.status === 200 && String(pv.json?.data?.content ?? '').length > 20 && pv.json?.data?.fallback === false,
+      `len=${pv.json?.data?.content?.length}`);
+  }
   const ds = await req('POST', '/ai/daily/save', { reportDate: today, content: pv.json?.data?.content }, OPERATOR_TOKEN);
   check('日报保存 200', ds.status === 200, `status=${ds.status}`);
   const dp = await req('GET', `/ai/daily/page?pageNum=1&pageSize=10&reportDate=${today}`, null, OPERATOR_TOKEN);
@@ -939,19 +955,28 @@ let schedWoId = null;
     `joined=${s4.deltas.join('').length} answer=${s4.done?.answer?.length}`);
 
   // 19.5 向量重建索引：admin 200 {docCount:4} / operator 403（权限边界）
-  const r1 = await req('POST', '/ai/knowledge/reindex', {}, ADMIN_TOKEN);
-  check('reindex 200 且 docCount=4（种子全量入库）',
-    r1.status === 200 && r1.json?.data?.docCount === 4 && r1.json?.data?.sectionCount >= 4,
-    JSON.stringify(r1.json?.data));
+  let r1 = { status: 0, json: null };
+  if (SKIP_AI) {
+    skipCheck('reindex 200 且 docCount=4（种子全量入库）');
+  } else {
+    r1 = await req('POST', '/ai/knowledge/reindex', {}, ADMIN_TOKEN);
+    check('reindex 200 且 docCount=4（种子全量入库）',
+      r1.status === 200 && r1.json?.data?.docCount === 4 && r1.json?.data?.sectionCount >= 4,
+      JSON.stringify(r1.json?.data));
+  }
   const r2 = await req('POST', '/ai/knowledge/reindex', {}, OPERATOR_TOKEN);
   check('operator reindex -> 403', r2.status === 403, `status=${r2.status}`);
 
   // 19.6 双路召回：语义问法（词面零重叠）向量命中 + 关键词问法排序保持
-  const p1 = await req('POST', '/ai/knowledge/ask', { question: '开机后屏幕全暗，没有任何画面显示' }, OPERATOR_TOKEN);
-  check('语义问法（词面零重叠）命中黑屏文档且非降级',
-    p1.status === 200 && p1.json?.data?.fallback === false
-      && (p1.json?.data?.references ?? []).some(x => x.docName?.includes('黑屏')),
-    `refs=${JSON.stringify(p1.json?.data?.references?.map(x => x.docName))}`);
+  if (SKIP_AI) {
+    skipCheck('语义问法（词面零重叠）命中黑屏文档且非降级');
+  } else {
+    const p1 = await req('POST', '/ai/knowledge/ask', { question: '开机后屏幕全暗，没有任何画面显示' }, OPERATOR_TOKEN);
+    check('语义问法（词面零重叠）命中黑屏文档且非降级',
+      p1.status === 200 && p1.json?.data?.fallback === false
+        && (p1.json?.data?.references ?? []).some(x => x.docName?.includes('黑屏')),
+      `refs=${JSON.stringify(p1.json?.data?.references?.map(x => x.docName))}`);
+  }
   const p2 = await req('POST', '/ai/knowledge/ask', { question: '烧录失败怎么处理' }, OPERATOR_TOKEN);
   const p2Refs = p2.json?.data?.references ?? [];
   check('关键词问法 references[0] 仍为烧录文档（排序保持）',
@@ -961,7 +986,8 @@ let schedWoId = null;
   // 19.7 AI 周报预览：pro 档趋势生成 + 环比摘要 + 7 行逐日数据
   const w1 = await req('POST', '/ai/weekly/preview', { endDate: today }, OPERATOR_TOKEN);
   check('周报预览 200 且 content>50 且非降级',
-    w1.status === 200 && String(w1.json?.data?.content ?? '').length > 50 && w1.json?.data?.fallback === false,
+    w1.status === 200 && String(w1.json?.data?.content ?? '').length > 50
+      && (SKIP_AI || w1.json?.data?.fallback === false),
     `len=${w1.json?.data?.content?.length}`);
   check('周报 summary 含环比与 7 行逐日数据',
     String(w1.json?.data?.summary ?? '').includes('环比')
@@ -986,11 +1012,15 @@ let schedWoId = null;
     `total=${wp2.json?.data?.total}`);
 
   // 19.9 收尾归位：reindex 重跑一遍保证向量态=种子态（对应 clean-smoke.sql 第 9 节注释）
-  const r3 = await req('POST', '/ai/knowledge/reindex', {}, ADMIN_TOKEN);
-  check('收尾 reindex 幂等归位（docCount=4 且段数一致）',
-    r3.status === 200 && r3.json?.data?.docCount === 4 && r3.json?.data?.sectionCount === r1.json?.data?.sectionCount,
-    JSON.stringify(r3.json?.data));
+  if (SKIP_AI) {
+    skipCheck('收尾 reindex 幂等归位（docCount=4 且段数一致）');
+  } else {
+    const r3 = await req('POST', '/ai/knowledge/reindex', {}, ADMIN_TOKEN);
+    check('收尾 reindex 幂等归位（docCount=4 且段数一致）',
+      r3.status === 200 && r3.json?.data?.docCount === 4 && r3.json?.data?.sectionCount === r1.json?.data?.sectionCount,
+      JSON.stringify(r3.json?.data));
+  }
 }
 
-console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
+console.log(`\n结果: ${pass} 通过, ${fail} 失败${SKIP_AI ? `, ${skipped} 跳过` : ''}`);
 process.exit(fail > 0 ? 1 : 0);
