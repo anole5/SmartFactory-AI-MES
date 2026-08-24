@@ -44,6 +44,14 @@ function skipCheck(name) {
   skipped++; console.log(`  -  ${name}（SMOKE_SKIP_AI 跳过）`);
 }
 
+// 服务端语义日期（Asia/Shanghai）：日报/周报/排程/报表接口按 +08 聚合，
+// CI 等 UTC 主机上 Node 进程时区会错位一天（跨日窗口），故显式 +08 计算
+function cnToday() {
+  const t = new Date(Date.now() + 8 * 3600 * 1000);
+  const pad2 = (n) => String(n).padStart(2, '0');
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
+
 // ------------------------------------------------------------
 // 0. 真实登录（JWT + RBAC 权限集合下发）
 // ------------------------------------------------------------
@@ -619,7 +627,7 @@ let taskIds = [];
     `len=${gs.json?.data?.suggestion?.length}`);
 
   // 16.5 生产日报：预览（flash 润色）→ 保存 → 同日幂等
-  const today = new Date().toISOString().slice(0, 10);
+  const today = cnToday();
   const pv = await req('POST', '/ai/daily/preview', { reportDate: today }, OPERATOR_TOKEN);
   if (SKIP_AI) {
     skipCheck('日报预览 200 且正文非空');
@@ -756,9 +764,7 @@ let extTaskIds = [];
 // ------------------------------------------------------------
 let schedWoId = null;
 {
-  const pad2 = (n) => String(n).padStart(2, '0');
-  const _d = new Date();
-  const TODAY = `${_d.getFullYear()}-${pad2(_d.getMonth() + 1)}-${pad2(_d.getDate())}`;
+  const TODAY = cnToday();
 
   // 18.1 批次主数据：种子 12 批 + 新建（MB 生成器）
   const b1 = await req('GET', '/production/material-batches/page?pageNum=1&pageSize=50', null, PLANNING_TOKEN);
@@ -946,7 +952,7 @@ let schedWoId = null;
     `meta=${JSON.stringify(s3.metas[0])} exceptionNo=${s3.done?.exceptionNo}`);
 
   // 19.4 日报流式：meta=REPORT+reportDate → done.summary 非空 + 契约完整
-  const today = new Date().toISOString().slice(0, 10);
+  const today = cnToday();
   const s4 = await sse('/ai/daily/preview/stream', { reportDate: today }, OPERATOR_TOKEN);
   check('日报流式 meta=REPORT 且 done.summary 非空',
     s4.status === 200 && s4.metas[0]?.intent === 'REPORT' && String(s4.done?.summary ?? '').length > 20,
