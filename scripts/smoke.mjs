@@ -1028,5 +1028,23 @@ let schedWoId = null;
   }
 }
 
+// ------------------------------------------------------------
+// 20. 第 8 周工程化：OpenAPI + Actuator（匿名可访问；非白名单接口匿名仍 401）
+// ------------------------------------------------------------
+{
+  const h = await req('GET', '/actuator/health', null, null);
+  check('actuator health 匿名 200 且 UP', h.status === 200 && h.json?.status === 'UP',
+    `status=${h.status} body=${JSON.stringify(h.json)?.slice(0, 80)}`);
+  const d = await req('GET', '/v3/api-docs', null, null);
+  check('v3/api-docs 匿名 200 且 openapi 3.x', d.status === 200 && String(d.json?.openapi ?? '').startsWith('3.'),
+    `status=${d.status}`);
+  const ui = await req('GET', '/swagger-ui/index.html', null, null);
+  check('swagger-ui/index.html 匿名 200', ui.status === 200, `status=${ui.status}`);
+  const uh = await req('GET', '/swagger-ui.html', null, null);
+  check('swagger-ui.html 匿名 302 跟随后 200', uh.status === 200, `status=${uh.status}`);
+  const anon = await req('GET', '/auth/menus', null, null);
+  check('非白名单接口匿名仍 401（白名单没放多）', anon.status === 401, `status=${anon.status}`);
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败${SKIP_AI ? `, ${skipped} 跳过` : ''}`);
 process.exit(fail > 0 ? 1 : 0);

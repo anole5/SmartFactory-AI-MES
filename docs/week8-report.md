@@ -27,7 +27,7 @@
 | T3 | Docker 多阶段镜像（backend/frontend）+ .dockerignore + nginx SSE 反代配置 | `cfc9dfa` | ✅ |
 | T4 | docker-compose 一键启动（三容器 healthy、SMOKE_BASE 可覆盖）+ CI 工作流 + 冒烟 SKIP_AI 门控 + CI UTC 主机跨日窗口修复（cnToday 统一 +08） | `cfc9dfa` + `2c48a7d` + `60b0645` | ✅ |
 | T5 | 演示材料终版 + README 终版（README/week8-report/demo-script/resume） | 本 commit | ✅ |
-| T6 | 冒烟 §20（工程化接口 5 断言）+ 干净重放 206 全绿 + 推送终版 | 终版 commit | ✅ |
+| T6 | 冒烟 §20（工程化接口 5 断言）+ 本机 mysql UTC 时区根治（JDBC sessionVariables）+ 干净重放 206 全绿 + 推送终版 | 本 commit | ✅ |
 
 ## 三、工程化四大件（面试可讲）
 
@@ -98,7 +98,9 @@ docker-compose.yml   mysql:8.0（./sql 挂 initdb 首启自动 00→14 + named v
 | verify-t8-compose.mjs | 8 | 8090 首页/反代 actuator/反代 api-docs、8082 直连 health、登录+menus、镜像与三容器 healthy |
 | smoke.mjs（SMOKE_BASE=8082） | 201/201 | compose 栈全量冒烟：容器内 DeepSeek 出网 + host-gateway 向量 RAG + nginx SSE 反代全链通过 |
 | smoke.mjs（SMOKE_SKIP_AI=1 仿真） | 195 过 + 5 跳 | 本地无 Key 仿真 CI：AI 项全部 gate，其余全跑（唯一失败为尚硅谷 mysql UTC 时区窗口偏差，与 AI 无关，非 AI 形态不补 gate） |
-| GitHub Actions | 双 job 绿 | build-test（构建+单测）+ smoke（无 AI 冒烟） |
+| GitHub Actions | 双 job 绿 | build-test（构建+单测）+ smoke（无 AI 冒烟）；CI 首跑红灯定位 smoke 的 today 取 Node 进程时区（UTC 主机跨日错位）→ cnToday() 统一 +08 修复后绿灯 |
+| smoke.mjs（干净重放终版） | **206/206** | 201 旧零改动 + §20 工程化 5 新断言全绿（含凌晨窗口今日产量——JDBC sessionVariables 根治本机 mysql UTC 时区） |
+| smoke.mjs（SMOKE_SKIP_AI=1 终版） | 201 过 + 5 跳 + 0 败 | CI 模式复验；clean-smoke 回种子（产品 3/物料 20/文档 4/工单 0/SN 0 复核） |
 
 ## 五、踩坑记录
 
@@ -111,7 +113,9 @@ docker-compose.yml   mysql:8.0（./sql 挂 initdb 首启自动 00→14 + named v
    读 UTF-8 SQL（`ç”µè†`=电视）→ mysql service 加 `LANG: C.UTF-8`；compose 与 CI service 同坑同解
 4. **尚硅谷 mysql 容器为 UTC**：应用写 +08 created_at → 00:00–08:00(+08) 窗口内
    `DATE(created_at)=CURDATE()` 型断言（今日产量）失败——历史冒烟全在白天未暴露；
-   compose/CI 两边 TZ=Asia/Shanghai 无此问题（本机终版冒烟安排在白天跑）
+   compose/CI 两边 TZ=Asia/Shanghai 无此问题。**根治**：JDBC URL 加
+   `sessionVariables=time_zone='%2B08:00'`（连接级 SET SESSION，不动服务器全局、不碰课程库；
+   坑：URL 里 + 必须 %2B 编码，否则解码成空格报 Unknown time zone）——本机任意时刻冒烟全绿
 5. **`backend/.mvn/maven.config` 写死 Windows 本地仓库路径**：Dockerfile/CI 构建前必须
    `rm -f .mvn/maven.config`（只删工作区副本，仓库文件不动）
 6. **.env / application-local.yml 是 Key 的唯一落点**：两者均 gitignore；.dockerignore 排除

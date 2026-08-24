@@ -28,7 +28,7 @@
     API Key 走 gitignored 本地配置 + 环境变量占位
   - 前端 Vue 3 + TypeScript + Element Plus + ECharts：15+ 业务页 + 4 个 AI 页 +
     电视 Demo 大屏；后端 60+ 接口
-  - 工程质量：全量冒烟 201 断言（Node 原生脚本，覆盖主链路/质量链路/AI 场景/权限边界），
+  - 工程质量：全量冒烟 206 断言（Node 原生脚本，覆盖主链路/质量链路/AI 场景/权限边界/工程化接口），
     每任务独立验证 + 独立 commit + Obsidian 实时周报；核心 Service 单元测试 40 断言
     （Mockito 纯单测不启 Spring 上下文，CI 秒级跑完）；Docker 多阶段镜像 +
     docker-compose 一键启动（MySQL/后端/前端三容器，中文 initdb 编码坑/Windows 本地仓库

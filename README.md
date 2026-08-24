@@ -14,7 +14,7 @@
 | 后端 | Java 17、Spring Boot 3.5.16、MyBatis-Plus 3.5.16、MySQL 8、Lombok、EasyExcel 4.0.3、SpringDoc OpenAPI 2.8.17、Actuator |
 | 前端 | Vue 3、Vite、TypeScript、Element Plus、Pinia、Vue Router、Axios、ECharts |
 | 部署 | Docker 多阶段镜像 + docker-compose 一键启动、GitHub Actions CI（构建+单测+无 AI 冒烟） |
-| 测试 | JUnit 5 + Mockito 核心 Service 单元测试、Node 原生脚本全量冒烟（201 断言） |
+| 测试 | JUnit 5 + Mockito 核心 Service 单元测试、Node 原生脚本全量冒烟（206 断言） |
 
 ## 目录结构
 
@@ -168,13 +168,13 @@ AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助�
 
 ```bash
 # 后端启动后执行（Node 18+ 内置 fetch，无需安装依赖）
-# 201 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）+ 第 6 周生产深化（物料批次/排程/报表）+ 第 7 周 AI 进阶（SSE 流式/向量 RAG/AI 周报）
+# 206 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）+ 第 6 周生产深化（物料批次/排程/报表）+ 第 7 周 AI 进阶（SSE 流式/向量 RAG/AI 周报）+ 第 8 周工程化（OpenAPI/Actuator 匿名可访问、白名单最小暴露）
 node scripts/smoke.mjs
 
 # 目标基址可覆盖（compose 栈冒烟打 8082）
 SMOKE_BASE=http://localhost:8082/api node scripts/smoke.mjs
 
-# CI 等无 AI 环境（无 DeepSeek Key/qdrant/TEI）：跳过 5 项 AI 硬依赖断言，其余 196 项全跑
+# CI 等无 AI 环境（无 DeepSeek Key/qdrant/TEI）：跳过 5 项 AI 硬依赖断言，其余 201 项全跑
 SMOKE_SKIP_AI=1 node scripts/smoke.mjs
 
 # 冒烟数据一键清理回种子状态（Git Bash）
@@ -373,7 +373,7 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
     compose 与 CI service 容器同款加 LANG + TZ=Asia/Shanghai（与 JDBC serverTimezone 对齐）。
 46. **CI 无 AI 环境门控**：DeepSeek Key 绝不进仓库，CI 无 Key、无 Qdrant/TEI——冒烟
     SMOKE_SKIP_AI=1 跳过 5 项 AI 硬依赖断言（reindex 是唯一会报错的向量端点）+ 周报预览
-    仅放行降级子句（content>50 仍校验）；其余 196 断言全跑（模板降级/关键词召回通道覆盖）。
+    仅放行降级子句（content>50 仍校验）；其余 201 断言全跑（模板降级/关键词召回通道覆盖）。
 
 ## 开发进度
 

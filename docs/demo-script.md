@@ -72,6 +72,6 @@ admin 全量按钮。说明"AI 对所有人开放、写回动作按角色收紧"
   http://localhost:8090/api/swagger-ui/index.html）——按模块分组的接口清单 + Try it out 在线调试
 - **单元测试**：`cd backend && ./mvn.cmd test`——5 个测试类 40 断言（Mockito 纯单测，无 Spring 上下文秒级跑完）
 - **CI 绿标**：GitHub README 顶部 badge 点开看 Actions 流水线——push 触发「构建+单测」与「无 AI 环境冒烟」双 job
-- 冒烟测试：`node scripts/smoke.mjs`（201 断言全绿；`SMOKE_SKIP_AI=1` 跳过 5 项 AI 断言供 CI 用）
+- 冒烟测试：`node scripts/smoke.mjs`（206 断言全绿；`SMOKE_SKIP_AI=1` 跳过 5 项 AI 断言供 CI 用）
 - 干净重放：`clean-smoke.sql` 一键回种子状态
 - 简历口径：见 `docs/resume.md`

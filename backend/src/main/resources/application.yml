@@ -62,7 +62,9 @@ spring:
     include: local
   datasource:
     # 开发环境复用本机 Docker 的 mysql:8.0 容器（尚硅谷课程栈，端口 3306）
-    url: jdbc:mysql://localhost:3306/smartfactory_mes?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    # sessionVariables 把连接会话时区设为 +08：本机 mysql 容器为 UTC（CURDATE() 按 UTC 算），
+    # 不设置则 00:00-08:00(+08) 窗口内 DATE(created_at)=CURDATE() 型统计（看板今日产量）少算一天
+    url: jdbc:mysql://localhost:3306/smartfactory_mes?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&sessionVariables=time_zone='%2B08:00'
     username: smartfactory
     password: Smartfactory@123
     driver-class-name: com.mysql.cj.jdbc.Driver
