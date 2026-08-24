@@ -4,6 +4,14 @@ server:
     # 所有接口统一挂 /api 前缀，前端 vite proxy 直接透传、无需重写路径
     context-path: /api
 
+# 可观测（第 8 周）：/actuator 已在鉴权白名单，但暴露面由这里收窄为 health/info——
+# CI 冒烟就绪探测与 compose healthcheck 都只依赖 health，其余端点不暴露
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
 # JWT 配置（HS256 密钥至少 32 字节；演示用固定值，生产应从环境变量/配置中心注入）
 jwt:
   secret: smartfactory-mes-demo-secret-key-20260823
