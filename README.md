@@ -1,5 +1,7 @@
 # SmartFactory-AI-MES
 
+[![CI](https://github.com/anole5/SmartFactory-AI-MES/actions/workflows/ci.yml/badge.svg)](https://github.com/anole5/SmartFactory-AI-MES/actions/workflows/ci.yml)
+
 轻量制造执行系统（MES）+ AI 工厂知识库。
 
 > 面向离散制造场景的学习/演示项目，第一版以 **AOC 55 英寸 4K 智能电视** 为 Demo 场景，
@@ -9,9 +11,10 @@
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Java 17、Spring Boot 3.5.16、MyBatis-Plus 3.5.16、MySQL 8、Lombok、EasyExcel 4.0.3 |
+| 后端 | Java 17、Spring Boot 3.5.16、MyBatis-Plus 3.5.16、MySQL 8、Lombok、EasyExcel 4.0.3、SpringDoc OpenAPI 2.8.17、Actuator |
 | 前端 | Vue 3、Vite、TypeScript、Element Plus、Pinia、Vue Router、Axios、ECharts |
-| 部署 | Docker（开发环境复用本机已有 MySQL 容器） |
+| 部署 | Docker 多阶段镜像 + docker-compose 一键启动、GitHub Actions CI（构建+单测+无 AI 冒烟） |
+| 测试 | JUnit 5 + Mockito 核心 Service 单元测试、Node 原生脚本全量冒烟（201 断言） |
 
 ## 目录结构
 
@@ -34,6 +37,26 @@ SmartFactory-AI-MES
 - Docker Desktop（提供 MySQL 8 容器，端口 3306）
 - Qdrant v1.16+（向量库，端口 6333 无鉴权）+ TEI 嵌入服务（端口 8081，模型 bge-large-zh-v1.5
   1024 维 Cosine）——仅知识库语义问答需要；缺失时 ask 自动退化关键词召回，其余功能不受影响
+
+### 0. 方式 B：Docker Compose 一键启动（第 8 周，免本机 JDK/Node）
+
+一条命令拉起 MySQL + 后端 + 前端全家桶（宿主端口 3307/8082/8090，避开常用端口冲突）：
+
+```bash
+docker compose up -d --build
+```
+
+- `./sql` 挂载到 MySQL 初始化目录，首启自动按字母序导入 00→14（建库 + 种子），named volume 持久化；
+  干净重放：`docker compose down -v` 后再 up
+- 后端经 `host-gateway` 只读复用宿主机 Qdrant（6333）与 TEI（8081）做向量 RAG；
+  需 DeepSeek Key 时新建 `.env` 填 `DEEPSEEK_API_KEY=sk-xxx`（该文件已 gitignore，绝不入库）
+- 受限网络（Docker Hub 拉不动基础镜像）退化方案：宿主机先出产物（`cd backend && ./mvn.cmd -DskipTests package`、
+  `cd frontend && npm install && npm run build`），再 `cp docker-compose.override.example.yml docker-compose.override.yml`
+  （override 已 gitignore）——切换 deploy/ 单阶段 Dockerfile，构建期零网络下载
+- 验证：`node scripts/verify-t8-compose.mjs`（8 断言）；浏览器打开 http://localhost:8090
+  （前端 nginx 反代 `/api`，SSE 流式已关代理缓冲）
+
+> 以下方式 A（本机启动）适合日常开发调试：数据库初始化 → 后端 8080 → 前端 5173。
 
 ### 1. 初始化数据库（一次性）
 
@@ -148,6 +171,12 @@ AI 应用四页（AI 助手/工厂知识库/异常建议助手/生产日报助�
 # 201 项断言：第 1/2/3 周回归 + AI 应用 + 第 5 周系统集成（ERP 外单全链/WMS/菜单树角色差异）+ 第 6 周生产深化（物料批次/排程/报表）+ 第 7 周 AI 进阶（SSE 流式/向量 RAG/AI 周报）
 node scripts/smoke.mjs
 
+# 目标基址可覆盖（compose 栈冒烟打 8082）
+SMOKE_BASE=http://localhost:8082/api node scripts/smoke.mjs
+
+# CI 等无 AI 环境（无 DeepSeek Key/qdrant/TEI）：跳过 5 项 AI 硬依赖断言，其余 196 项全跑
+SMOKE_SKIP_AI=1 node scripts/smoke.mjs
+
 # 冒烟数据一键清理回种子状态（Git Bash）
 docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 smartfactory_mes < scripts/clean-smoke.sql
 ```
@@ -232,6 +261,9 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 | WMS | GET | `/api/integration/wms/transactions/page` | 库存流水分页（workOrderId/itemType/bizType） |
 | WMS | POST | `/api/integration/wms/stock-in` | 采购入库（ON DUPLICATE KEY 累加 + 流水） |
 | WMS | POST | `/api/integration/wms/pick` | 工单领料（BOM 关键物料 × 计划数，幂等：已足额领用 409） |
+| 接口文档 | GET | `/api/v3/api-docs` | OpenAPI 3 JSON（Swagger UI 数据源，匿名可访问） |
+| 接口文档 | GET | `/api/swagger-ui/**` | Swagger UI 在线调试页面（匿名可访问） |
+| 运维 | GET | `/api/actuator/health` | 健康检查 UP（CI/容器就绪探测；exposure 仅 health,info） |
 
 ## 技术决策记录
 
@@ -326,10 +358,26 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 41. **周报窗口口径 D-7..D-1 vs D-14..D-8**：种子不种今天（今天的报工留给冒烟），本周窗口取
     截止日前 7 个完整自然日，与 14-seed 注释的演示故事（良率 94.1%→98.1%）对齐；日报/周报
     以 (report_date, report_type) 唯一键并存，page 默认 reportType=DAY 保证旧调用零影响。
+42. **单元测试纯 Mockito 不启 Spring 上下文**：核心 Service 用 @InjectMocks/手动 new 构造器
+    注入 mock（Mapper/客户端全 mock），无 DB/网络依赖，CI 秒级跑完；CurrentUserContext
+    set/finally clear 模拟登录态（AuditMetaObjectHandler 读不到用户会落 created_by=0）。
+43. **springdoc/actuator 匿名白名单最小暴露**：仅 `/swagger-ui/**`、`/v3/api-docs/**`、
+    `/actuator/**` 匿名（鉴权白名单追加 4 行），暴露面由 management.exposure 收窄为
+    health,info；冒烟有"非白名单接口匿名 401"断言防白名单放多。
+44. **多阶段 Docker 镜像 + 本地产物退化方案**：backend = maven 镜像打包 + jre 镜像运行、
+    frontend = node 构建 + nginx 托管（history 路由 try_files + /api 反代 SSE 关缓冲）；
+    构建容器内必须先 rm `.mvn/maven.config`（本机 Windows 仓库路径坑）；受限网络下
+    deploy/ 单阶段 Dockerfile COPY 宿主机产物、构建期零网络下载（override 切换）。
+45. **MySQL 官方镜像必须 LANG=C.UTF-8**：无 LANG 时 docker-entrypoint 按 latin1 读 UTF-8
+    的 initdb SQL，中文种子双重编码乱码（实测 doc_name 全乱、RAG 引用/排程快照连锁失败）；
+    compose 与 CI service 容器同款加 LANG + TZ=Asia/Shanghai（与 JDBC serverTimezone 对齐）。
+46. **CI 无 AI 环境门控**：DeepSeek Key 绝不进仓库，CI 无 Key、无 Qdrant/TEI——冒烟
+    SMOKE_SKIP_AI=1 跳过 5 项 AI 硬依赖断言（reindex 是唯一会报错的向量端点）+ 周报预览
+    仅放行降级子句（content>50 仍校验）；其余 196 断言全跑（模板降级/关键词召回通道覆盖）。
 
 ## 开发进度
 
-> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md) · [第 6 周完成报告](docs/week6-report.md) · [第 7 周完成报告](docs/week7-report.md)
+> 各周完成详情见 `docs/` 周报：[第 1 周完成报告](docs/week1-report.md) · [第 2 周完成报告](docs/week2-report.md) · [第 3 周完成报告](docs/week3-report.md) · [第 4 周完成报告](docs/week4-report.md) · [第 5 周完成报告](docs/week5-report.md) · [第 6 周完成报告](docs/week6-report.md) · [第 7 周完成报告](docs/week7-report.md) · [第 8 周完成报告](docs/week8-report.md)
 > 另有 [10 步演示脚本](docs/demo-script.md) 与 [简历项目描述](docs/resume.md)。
 
 - [x] 第 1 周：工程骨架 + 基础资料（产品/物料/BOM/工艺路线/工序/工位）+ 电视 Demo 大屏
@@ -339,3 +387,4 @@ docker exec -i mysql mysql -uroot -pAtguigu.123 --default-character-set=utf8mb4 
 - [x] 第 5 周：系统集成（ERP 模拟下单一键转工单 / WMS 采购入库与工单领料 / 前端动态路由菜单树驱动）
 - [x] 第 6 周：生产深化（物料批次追溯正反闭环 / 生产排程甘特图 / 报表中心三粒度 + Excel 导出）
 - [x] 第 7 周（AI 进阶）：SSE 流式输出（打字机 + 停止按钮）/ 向量 RAG 双路召回（语义问答命中）/ AI 周报（趋势 + 环比）
+- [x] 第 8 周（工程化收尾）：核心 Service 单元测试 / OpenAPI(springdoc)+Actuator / Docker 镜像 + Compose 一键启动 / GitHub Actions CI / 演示材料终版

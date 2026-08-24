@@ -1,6 +1,11 @@
 # 演示脚本（10 步，约 15 分钟）
 
-> 前置：干净重放 00→08 种子；后端 8080、前端 5173 已启动；DeepSeek Key 已配（application-local.yml）。
+> 前置（二选一，第 8 周推荐方式 A）：
+> - **方式 A：Docker Compose 一键起**（免本机 JDK/Node）：`docker compose up -d --build` →
+>   浏览器 http://localhost:8090；`.env` 配 `DEEPSEEK_API_KEY` 后 AI 全功能；
+>   干净重放 = `docker compose down -v` 后再 up
+> - **方式 B：本机双启动**：干净重放 00→14 种子（见 README「初始化数据库」）；后端 8080、前端 5173 已启动；
+>   DeepSeek Key 已配（application-local.yml）
 > 电视 Demo 大屏（/tv-demo）可全程挂第二屏循环播放，背景氛围用。
 
 ## 第 1 步：登录与账号（1 分钟）
@@ -59,8 +64,14 @@ qa 登录 → 质检任务开始检验 → 检验录入（合格/不良 + 不良
 换 operator 登录对比：AI 四页可看可用但知识库无新建按钮、异常建议无保存按钮；
 admin 全量按钮。说明"AI 对所有人开放、写回动作按角色收紧"的设计。
 
-## 备用彩蛋
+## 备用彩蛋（工程化，第 8 周）
 
-- 冒烟测试：`node scripts/smoke.mjs`（139 断言全绿）
+- **Docker 一键起**：`docker compose up -d --build`——MySQL/后端/前端三容器约 1 分钟全部 healthy
+  （宿主端口 3307/8082/8090），`docker compose down -v` 秒级重置（可引出"环境可复现/交付形态"话题）
+- **在线接口文档**：http://localhost:8080/api/swagger-ui/index.html（compose 栈 =
+  http://localhost:8090/api/swagger-ui/index.html）——按模块分组的接口清单 + Try it out 在线调试
+- **单元测试**：`cd backend && ./mvn.cmd test`——5 个测试类 40 断言（Mockito 纯单测，无 Spring 上下文秒级跑完）
+- **CI 绿标**：GitHub README 顶部 badge 点开看 Actions 流水线——push 触发「构建+单测」与「无 AI 环境冒烟」双 job
+- 冒烟测试：`node scripts/smoke.mjs`（201 断言全绿；`SMOKE_SKIP_AI=1` 跳过 5 项 AI 断言供 CI 用）
 - 干净重放：`clean-smoke.sql` 一键回种子状态
 - 简历口径：见 `docs/resume.md`
